@@ -1,0 +1,20 @@
+# USB communication (replaces hid / hidapi)
+pyusb>=1.2.1
+
+# Metrics
+psutil>=5.9.0
+pynvml>=12.0.0
+pyamdgpuinfo>=2.1.7       # AMD GPU — optional, gracefully skipped if missing
+
+# Rendering
+Pillow>=10.0.0
+numpy>=1.24.0
+
+# Media
+opencv-python>=4.8.0      # video frame extraction — optional
+
+# GUI
+PySide6>=6.5.0
+
+# Build / packaging
+pyinstaller>=6.0.0

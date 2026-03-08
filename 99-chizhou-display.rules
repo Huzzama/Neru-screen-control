@@ -1,0 +1,6 @@
+# ChiZhu Tech USBDISPLAY (used in Thermalright LCD coolers)
+# Install: sudo cp 99-chizhou-display.rules /etc/udev/rules.d/
+# Reload:  sudo udevadm control --reload-rules && sudo udevadm trigger
+# Then unplug and replug the USB cable.
+
+SUBSYSTEM=="usb", ATTRS{idVendor}=="87ad", ATTRS{idProduct}=="70db", MODE="0666"

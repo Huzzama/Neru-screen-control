@@ -1,0 +1,77 @@
+{
+  "Frozen Warframe": {
+    "screen_size_inch": 2.4,
+    "width": 320,
+    "height": 240
+  },
+  "Core Matrix": {
+    "screen_size_inch": 2.0,
+    "width": 320,
+    "height": 240
+  },
+  "Mjolnir Vision": {
+    "screen_size_inch": 3.5,
+    "width": 640,
+    "height": 480
+  },
+  "Stream Vision": {
+    "screen_size_inch": 3.5,
+    "width": 640,
+    "height": 480
+  },
+  "Peerless Vision": {
+    "screen_size_inch": 3.95,
+    "width": 480,
+    "height": 480
+  },
+  "Guard Vision": {
+    "screen_size_inch": 3.95,
+    "width": 480,
+    "height": 480
+  },
+  "Hyper Vision": {
+    "screen_size_inch": 3.95,
+    "width": 480,
+    "height": 480
+  },
+  "Elite Vision": {
+    "screen_size_inch": 3.95,
+    "width": 480,
+    "height": 480
+  },
+  "Core Vision": {
+    "screen_size_inch": 2.1,
+    "width": 480,
+    "height": 480
+  },
+  "Frozen Guardian": {
+    "screen_size_inch": 2.88,
+    "width": 480,
+    "height": 480
+  },
+  "Frozen Vision": {
+    "screen_size_inch": 2.88,
+    "width": 480,
+    "height": 480
+  },
+  "Trofeo Vision": {
+    "screen_size_inch": 6.98,
+    "width": 1280,
+    "height": 480
+  },
+  "Leviathan Vision": {
+    "screen_size_inch": 6.67,
+    "width": 2400,
+    "height": 1080
+  },
+  "Rainbow Vision": {
+    "screen_size_inch": 6.67,
+    "width": 2400,
+    "height": 1080
+  },
+  "Wonder Vision": {
+    "screen_size_inch": 6.67,
+    "width": 2400,
+    "height": 1080
+  }
+}
