@@ -1,0 +1,34 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+override_dh_auto_install:
+	# Application files
+	install -dm755 $(DESTDIR)/usr/share/neru-screen-control
+	cp -r src main.py icon.png requirements.txt \
+	    $(DESTDIR)/usr/share/neru-screen-control/
+
+	# Service template
+	install -Dm644 packaging/shared/neru-screen-control.service \
+	    $(DESTDIR)/usr/share/neru-screen-control/neru-screen-control.service
+
+	# Desktop launcher
+	install -Dm644 packaging/shared/neru-screen-control.desktop \
+	    $(DESTDIR)/usr/share/applications/neru-screen-control.desktop
+
+	# Icons
+	for size in 16 32 48 64 128 256; do \
+	    install -Dm644 \
+	        packaging/shared/icons/$${size}x$${size}/neru-screen-control.png \
+	        $(DESTDIR)/usr/share/icons/hicolor/$${size}x$${size}/apps/neru-screen-control.png; \
+	done
+
+	# udev rule
+	install -Dm644 99-chizhou-display.rules \
+	    $(DESTDIR)/usr/lib/udev/rules.d/99-chizhou-display.rules
+
+override_dh_auto_build:
+	# No build step needed for Python
+
+override_dh_auto_test:
+	# Skip tests during packaging

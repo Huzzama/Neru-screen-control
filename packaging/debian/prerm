@@ -1,0 +1,15 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+  remove|purge)
+    # Stop any running service instances for all users
+    # (best effort — user services can't always be stopped from root)
+    pkill -f "neru-screen-control --background" 2>/dev/null || true
+
+    # Remove wrapper binary
+    rm -f /usr/bin/neru-screen-control
+    ;;
+esac
+
+exit 0

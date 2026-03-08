@@ -1,0 +1,41 @@
+#!/bin/bash
+set -e
+
+APP="neru-screen-control"
+SHARE="/usr/share/$APP"
+
+case "$1" in
+  configure)
+    # Create the /usr/bin launcher wrapper
+    cat > /usr/bin/"$APP" << 'WRAPPER'
+#!/bin/bash
+exec python3 /usr/share/neru-screen-control/main.py "$@"
+WRAPPER
+    chmod +x /usr/bin/"$APP"
+
+    # Install Python dependencies system-wide
+    if command -v pip3 >/dev/null 2>&1; then
+      pip3 install -r "$SHARE/requirements.txt" \
+        --quiet --break-system-packages 2>/dev/null \
+        || pip3 install -r "$SHARE/requirements.txt" --quiet || true
+    fi
+
+    # Refresh icon cache
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+      gtk-update-icon-cache /usr/share/icons/hicolor/ 2>/dev/null || true
+    fi
+
+    # Refresh desktop database
+    if command -v update-desktop-database >/dev/null 2>&1; then
+      update-desktop-database /usr/share/applications/ 2>/dev/null || true
+    fi
+
+    # Reload udev rules
+    if command -v udevadm >/dev/null 2>&1; then
+      udevadm control --reload-rules 2>/dev/null || true
+      udevadm trigger --subsystem-match=usb 2>/dev/null || true
+    fi
+    ;;
+esac
+
+exit 0

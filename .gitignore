@@ -48,8 +48,8 @@ AppDir/
 squashfs-root/
 appimagetool
 
-# Temporary debian/ dir created during .deb build
-debian/
+# Temporary debian/ dir created during .deb build (root level only)
+/debian/
 
 # ── Generated docs ─────────────────────────────────────────────────────────────
 Neru-Screen-Control-Packaging-Guide.docx

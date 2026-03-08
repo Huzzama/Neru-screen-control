@@ -1,0 +1,25 @@
+Source: neru-screen-control
+Section: utils
+Priority: optional
+Maintainer: Huzzama <your@email.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/Huzzama/Neru-screen-control
+Rules-Requires-Root: no
+
+Package: neru-screen-control
+Architecture: all
+Depends: python3 (>= 3.10),
+         python3-pip,
+         libusb-1.0-0,
+         policykit-1
+Recommends: python3-pyside6,
+            python3-pil
+Suggests: python3-opencv
+Description: LCD display controller for Thermalright USB cooler screens
+ Neru Screen Control lets you drive the small USB LCD display built into
+ Thermalright CPU coolers directly from Linux — no Windows software required.
+ .
+ Features include live CPU/GPU metric display with a custom canvas theme
+ editor, image/GIF/video playback, a built-in calibration tool, systemd
+ user service for background operation, and a system tray icon.

@@ -1,0 +1,12 @@
+# Application source
+src/           usr/share/neru-screen-control/src/
+main.py        usr/share/neru-screen-control/
+icon.png       usr/share/neru-screen-control/
+requirements.txt usr/share/neru-screen-control/
+
+# Desktop integration
+packaging/shared/neru-screen-control.desktop  usr/share/applications/
+packaging/shared/neru-screen-control.service  usr/share/neru-screen-control/
+
+# udev rule
+99-chizhou-display.rules  usr/lib/udev/rules.d/
