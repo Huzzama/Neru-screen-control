@@ -25,7 +25,8 @@ jobs:
           sudo apt-get install -y \
             python3 python3-pip python3-venv \
             debhelper devscripts build-essential \
-            imagemagick wget libusb-1.0-0-dev
+            imagemagick wget libusb-1.0-0-dev \
+            libfuse2
 
       - name: Generate multi-size icons
         run: |

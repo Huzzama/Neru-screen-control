@@ -59,7 +59,7 @@ fi
 
 # 7. Build AppImage
 echo "==> Packaging AppImage..."
-ARCH="$ARCH" ./appimagetool AppDir "$OUTPUT"
+ARCH="$ARCH" ./appimagetool --appimage-extract-and-run AppDir "$OUTPUT"
 
 echo ""
 echo "✓ Built: $OUTPUT"
