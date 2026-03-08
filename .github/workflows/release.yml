@@ -26,7 +26,7 @@ jobs:
             python3 python3-pip python3-venv \
             debhelper devscripts build-essential \
             imagemagick wget libusb-1.0-0-dev \
-            libfuse2
+            libfuse2 fakeroot
 
       - name: Generate multi-size icons
         run: |
@@ -44,7 +44,8 @@ jobs:
       - name: Build .deb package
         run: |
           cp -r packaging/debian debian
-          dpkg-buildpackage -us -uc -b
+          chmod +x debian/rules debian/postinst debian/prerm
+          dpkg-buildpackage -us -uc -b -rfakeroot
           mv ../neru-screen-control_*.deb .
 
       - name: Generate checksums
