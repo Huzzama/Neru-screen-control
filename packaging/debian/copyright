@@ -1,10 +1,10 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: neru-screen-control
-Upstream-Contact: Huzzama <your@email.com>
+Upstream-Contact: Huzzama <chewbaccanator0405@gmail.com>
 Source: https://github.com/Huzzama/Neru-screen-control
 
 Files: *
-Copyright: 2024 Huzzama
+Copyright: 2026 Huzzama
 License: MIT
 
 License: MIT

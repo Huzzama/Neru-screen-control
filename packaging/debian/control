@@ -1,7 +1,7 @@
 Source: neru-screen-control
 Section: utils
 Priority: optional
-Maintainer: Huzzama <your@email.com>
+Maintainer: Huzzama <chewbaccanator0405@gmail.com>
 Build-Depends: debhelper-compat (= 13)
 Standards-Version: 4.6.2
 Homepage: https://github.com/Huzzama/Neru-screen-control
