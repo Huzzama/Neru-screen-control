@@ -1,0 +1,7 @@
+#!/bin/bash
+# AppImage entry point for Neru Screen Control
+HERE=$(dirname $(readlink -f "$0"))
+export PYTHONPATH="$HERE/usr/share/neru-screen-control:$PYTHONPATH"
+export PATH="$HERE/usr/share/neru-screen-control/venv/bin:$PATH"
+exec "$HERE/usr/share/neru-screen-control/venv/bin/python" \
+     "$HERE/usr/share/neru-screen-control/main.py" "$@"

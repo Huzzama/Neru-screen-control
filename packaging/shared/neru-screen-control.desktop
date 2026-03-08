@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Neru Screen Control
+GenericName=LCD Display Controller
+Comment=Control and display information on Thermalright USB LCD screens
+Exec=/usr/bin/neru-screen-control --ui
+Icon=neru-screen-control
+Terminal=false
+Categories=Utility;System;HardwareSettings;
+Keywords=LCD;display;thermalright;cooler;USB;monitor;
+StartupNotify=true
+StartupWMClass=neru-screen-control
