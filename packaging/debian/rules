@@ -1,4 +1,8 @@
 #!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+DESTDIR := $(CURDIR)/debian/neru-screen-control
+
 %:
 	dh $@
 
@@ -23,7 +27,7 @@ override_dh_auto_install:
 	        $(DESTDIR)/usr/share/icons/hicolor/$${size}x$${size}/apps/neru-screen-control.png; \
 	done
 
-	# udev rule
+	# udev rule (into package staging dir, NOT real /usr/lib)
 	install -Dm644 99-chizhou-display.rules \
 	    $(DESTDIR)/usr/lib/udev/rules.d/99-chizhou-display.rules
 
