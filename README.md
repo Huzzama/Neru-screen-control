@@ -1,4 +1,4 @@
-# Neru Screen Control
+# Neru Screen Control – Thermalright LCD Control for Linux
 
 > Open-source Linux driver and GUI for Thermalright USB LCD cooler displays.
 
