@@ -9,8 +9,8 @@
 
 > **v2 is a rewrite in Rust + Tauri.** The Python/PySide6 app (v1.x) is in the
 > git history and in the [1.x releases](https://github.com/Huzzama/Neru-screen-control/releases).
-> v2 ships the desktop app (screen themes editor, live preview, tray), the core
-> library and the `neru` command-line tool. RGB (via OpenRGB) and fan control are next.
+> v2 ships the desktop app (screen themes editor, live preview, tray, RGB through
+> OpenRGB), the core library and the `neru` command-line tool. Fan control is next.
 
 ## The app
 
@@ -18,6 +18,10 @@
 * **Screen** — theme gallery and a live editor: text with metric placeholders, bars,
   arc gauges, shapes, images, animated GIFs and video. Every edit is pushed to the
   screen as you make it.
+* **RGB** — every device OpenRGB knows (motherboard ARGB headers → cooler fans and
+  pump, RAM, GPU…): per-zone software effects (static, breathing, rainbow, colour
+  cycle, temperature-reactive) or device-native modes, OpenRGB profiles. See
+  [`docs/RGB.md`](docs/RGB.md).
 * **Settings** — start on login (tray), frame rate, JPEG quality, Fahrenheit, udev
   rules installer, Thermalright calibration.
 * Runs in the tray; `neru-screen-control --background` starts hidden (what the
@@ -89,9 +93,11 @@ neru theme ls                                        # bundled themes (assets/th
 neru theme render assets/themes/neru-720.json -o frame.png --fake   # preview without a screen
 neru theme run assets/themes/neru-720.json           # live metrics on the screen, Ctrl-C to stop
 neru fonts                                           # font families themes can use
+neru rgb devices                                     # what the OpenRGB server reports
+neru rgb set 0 ff0000 --zone 1                       # paint a zone (sanity check)
 ```
 
-Video backgrounds need `ffmpeg`.
+Video backgrounds need `ffmpeg`. RGB needs OpenRGB with its SDK server (`docs/RGB.md`).
 
 ## Project layout
 

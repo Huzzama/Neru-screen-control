@@ -108,6 +108,8 @@ pub fn run() {
                     }
                     let _ = h.emit("status", &status);
                     state.update_tray(&h, &status);
+                    state.maybe_start_rgb_server();
+                    let _ = h.emit("rgb-status", &state.rgb_status());
                 })
                 .expect("spawn status thread");
             Ok(())
@@ -151,6 +153,15 @@ pub fn run() {
             commands::app_info,
             commands::metric_keys,
             commands::theme_thumbnail,
+            commands::rgb_status,
+            commands::rgb_set_assignment,
+            commands::rgb_apply_all,
+            commands::rgb_clear_all,
+            commands::rgb_refresh,
+            commands::rgb_rescan,
+            commands::rgb_profile,
+            commands::rgb_save_to_device,
+            commands::rgb_start_server,
             commands::quit_app,
         ])
         .build(tauri::generate_context!())

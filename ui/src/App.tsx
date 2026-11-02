@@ -14,7 +14,7 @@ export type Page = "dashboard" | "screen" | "rgb" | "fans" | "settings";
 const NAV: { id: Page; label: string; icon: typeof LayoutDashboard; soon?: boolean }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "screen", label: "Screen", icon: MonitorSmartphone },
-  { id: "rgb", label: "RGB", icon: Lightbulb, soon: true },
+  { id: "rgb", label: "RGB", icon: Lightbulb },
   { id: "fans", label: "Fans", icon: Fan, soon: true },
   { id: "settings", label: "Settings", icon: Settings },
 ];

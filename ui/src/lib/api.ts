@@ -77,6 +77,7 @@ export interface AppConfig {
   };
   metrics: { interval_ms: number; fahrenheit: boolean };
   app: { start_on_login: boolean; launch_hidden: boolean; tray_icon: boolean; minimize_on_close: boolean };
+  rgb: RgbConfig;
 }
 
 // ── Themes ──────────────────────────────────────────────────────────────────
@@ -173,6 +174,29 @@ export interface AppInfo {
   exe: string; background_mode: boolean; ffmpeg: boolean;
 }
 export interface MetricKey { key: string; label: string; unit: string }
+
+// ── RGB ─────────────────────────────────────────────────────────────────────
+export type Effect =
+  | { kind: "off" }
+  | { kind: "static"; color: string }
+  | { kind: "breathing"; color: string; period_s: number }
+  | { kind: "rainbow"; speed: number; spread: number }
+  | { kind: "color_cycle"; colors: string[]; period_s: number }
+  | { kind: "temperature"; metric: string; ramp: Stop[] }
+  | { kind: "hardware"; mode: string; color: string | null; speed: number | null; brightness: number | null };
+
+export interface RgbAssignment { controller: string; zone: number | null; effect: Effect }
+export interface RgbConfig { enabled: boolean; server: string; fps: number; brightness: number; assignments: RgbAssignment[]; start_server: boolean }
+export interface RgbMode {
+  name: string; value: number; flags: number; speed_min: number; speed_max: number; brightness_min: number; brightness_max: number;
+  colors_min: number; colors_max: number; speed: number; brightness: number; direction: number; color_mode: number; colors: { r: number; g: number; b: number }[];
+}
+export interface RgbZone { index: number; name: string; leds_count: number; start_idx: number; matrix: [number, number] | null; segments: string[]; preview: string[]; effect: Effect | null }
+export interface RgbController {
+  key: string; index: number; name: string; vendor: string; kind: string; description: string; location: string; version: string; serial: string;
+  active_mode: number; modes: RgbMode[]; zones: RgbZone[]; leds: number; software: boolean;
+}
+export interface RgbStatus { enabled: boolean; connected: boolean; server: string; protocol: number; error: string | null; controllers: RgbController[]; profiles: string[]; fps_actual: number; last_message: string | null }
 export interface PreviewFrame { data: string; width: number; height: number; seq: number }
 
 // ── Calls ───────────────────────────────────────────────────────────────────
@@ -204,6 +228,16 @@ export const api = {
   appInfo: () => invoke<AppInfo>("app_info"),
   metricKeys: () => invoke<MetricKey[]>("metric_keys"),
   thumbnail: (id: string, max = 320) => invoke<string>("theme_thumbnail", { id, max }),
+  rgbStatus: () => invoke<RgbStatus>("rgb_status"),
+  rgbSetAssignment: (controller: string, zone: number | null, effect: Effect | null) => invoke<void>("rgb_set_assignment", { controller, zone, effect }),
+  rgbApplyAll: (effect: Effect) => invoke<void>("rgb_apply_all", { effect }),
+  rgbClearAll: () => invoke<void>("rgb_clear_all"),
+  rgbRefresh: () => invoke<void>("rgb_refresh"),
+  rgbRescan: () => invoke<void>("rgb_rescan"),
+  rgbProfile: (op: "load" | "save" | "delete", name: string) => invoke<void>("rgb_profile", { op, name }),
+  rgbSaveToDevice: (controller: string) => invoke<void>("rgb_save_to_device", { controller }),
+  rgbStartServer: () => invoke<string>("rgb_start_server"),
+  onRgbStatus: (cb: (s: RgbStatus) => void): Promise<UnlistenFn> => listen<RgbStatus>("rgb-status", (e) => cb(e.payload)),
   quit: () => invoke<void>("quit_app"),
   onPreview: (cb: (f: PreviewFrame) => void): Promise<UnlistenFn> => listen<PreviewFrame>("preview-frame", (e) => cb(e.payload)),
   onStatus: (cb: (s: EngineStatus) => void): Promise<UnlistenFn> => listen<EngineStatus>("status", (e) => cb(e.payload)),

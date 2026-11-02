@@ -13,6 +13,7 @@ use tracing::{info, warn};
 use neru_core::config::{AppConfig, Paths};
 use neru_core::engine::{Command, Engine, EngineConfig, EngineStatus, PreviewFrame};
 use neru_core::render::{FontBook, Theme};
+use neru_core::rgb::{RgbCommand, RgbEngine};
 use neru_core::themes::ThemeStore;
 
 pub struct TrayItems {
@@ -24,6 +25,9 @@ pub struct AppState {
     pub paths: Paths,
     pub config: Mutex<AppConfig>,
     pub engine: Mutex<Engine>,
+    pub rgb: Mutex<RgbEngine>,
+    pub rgb_server: Mutex<Option<std::process::Child>>,
+    pub started: std::time::Instant,
     pub fonts: Arc<FontBook>,
     pub themes: ThemeStore,
     pub quitting: AtomicBool,
@@ -63,11 +67,15 @@ impl AppState {
             let _ = app.emit("preview-frame", PreviewPayload { data, width: f.width, height: f.height, seq: f.seq });
         });
         let engine = Engine::start(engine_cfg, theme, fonts.clone(), Some(sink))?;
+        let rgb = RgbEngine::start(config.rgb.clone(), engine.metrics_shared());
 
         Ok(Self {
             paths,
             config: Mutex::new(config),
             engine: Mutex::new(engine),
+            rgb: Mutex::new(rgb),
+            rgb_server: Mutex::new(None),
+            started: std::time::Instant::now(),
             fonts,
             themes,
             quitting: AtomicBool::new(false),
@@ -137,6 +145,55 @@ impl AppState {
         self.engine.lock().map(|e| e.status()).unwrap_or_default()
     }
 
+    pub fn send_rgb(&self, cmd: RgbCommand) {
+        if let Ok(r) = self.rgb.lock() {
+            r.send(cmd);
+        }
+    }
+
+    pub fn rgb_status(&self) -> neru_core::rgb::RgbStatus {
+        self.rgb.lock().map(|r| r.status()).unwrap_or_default()
+    }
+
+    /// Launch `openrgb --server` when configured, nothing answers and it is installed.
+    pub fn maybe_start_rgb_server(&self) {
+        let cfg = match self.config.lock() {
+            Ok(c) => c.rgb.clone(),
+            Err(_) => return,
+        };
+        if !cfg.enabled || !cfg.start_server || self.started.elapsed() < Duration::from_secs(6) {
+            return;
+        }
+        let st = self.rgb_status();
+        if st.connected {
+            return;
+        }
+        let mut child = match self.rgb_server.lock() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        if child.is_some() {
+            return;
+        }
+        if !cfg.server.starts_with("127.0.0.1") && !cfg.server.starts_with("localhost") {
+            return;
+        }
+        let Some(bin) = which("openrgb") else { return };
+        match std::process::Command::new(&bin)
+            .args(["--server", "--noautoconnect"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(c) => {
+                info!(bin = %bin.display(), "started the OpenRGB SDK server");
+                *child = Some(c);
+            }
+            Err(e) => warn!(error = %e, "could not start openrgb --server"),
+        }
+    }
+
     pub fn set_pause(&self, paused: bool) {
         self.send(Command::Pause(paused));
     }
@@ -165,6 +222,9 @@ impl AppState {
         }
         if new.screen.model != old.screen.model {
             self.send(Command::SetModel(new.screen.model.clone()));
+        }
+        if new.rgb != old.rgb {
+            self.send_rgb(RgbCommand::SetConfig(new.rgb.clone()));
         }
         new.save(&self.paths.config_file).map_err(|e| e.to_string())?;
         *self.config.lock().map_err(|e| e.to_string())? = new;
@@ -196,5 +256,18 @@ impl AppState {
         if let Ok(mut e) = self.engine.lock() {
             e.stop();
         }
+        if let Ok(mut r) = self.rgb.lock() {
+            r.stop();
+        }
+        if let Ok(mut c) = self.rgb_server.lock() {
+            if let Some(child) = c.as_mut() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
     }
+}
+
+pub fn which(bin: &str) -> Option<std::path::PathBuf> {
+    std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(bin)).find(|p| p.is_file()))
 }

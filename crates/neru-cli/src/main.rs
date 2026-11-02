@@ -83,6 +83,27 @@ enum Cmd {
     Theme(ThemeCmd),
     /// List font families available to themes
     Fonts,
+    /// RGB lighting through the OpenRGB SDK server
+    #[command(subcommand)]
+    Rgb(RgbCmd),
+}
+
+#[derive(Subcommand)]
+enum RgbCmd {
+    /// List devices, zones and modes known to OpenRGB
+    Devices {
+        #[arg(long, default_value = "127.0.0.1:6742")]
+        server: String,
+    },
+    /// Set every LED of a device (or one zone) to a colour, e.g. `ff0000`
+    Set {
+        device: u32,
+        color: String,
+        #[arg(long)]
+        zone: Option<u32>,
+        #[arg(long, default_value = "127.0.0.1:6742")]
+        server: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -162,7 +183,58 @@ fn run() -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Cmd::Rgb(RgbCmd::Devices { server }) => rgb_devices(&server),
+        Cmd::Rgb(RgbCmd::Set { device, color, zone, server }) => rgb_set(&server, device, &color, zone),
     }
+}
+
+fn rgb_devices(server: &str) -> anyhow::Result<()> {
+    use neru_core::rgb::OpenRgbClient;
+    let mut c = OpenRgbClient::connect(server)?;
+    println!("OpenRGB at {server}, protocol {}", c.version);
+    let devices = c.controllers()?;
+    if devices.is_empty() {
+        println!("no devices — check OpenRGB itself (udev rules, i2c modules) and that the SDK server is on");
+    }
+    for d in &devices {
+        println!("\n[{}] {} — {} ({}), {} LEDs, {}", d.index, d.name, d.vendor, d.kind_name(), d.leds.len(), d.location);
+        for (i, z) in d.zones.iter().enumerate() {
+            println!("    zone {i}: {} ({} LEDs{})", z.name, z.leds_count, z.matrix.map_or(String::new(), |(w, h)| format!(", {w}×{h} matrix")));
+        }
+        let modes: Vec<String> = d
+            .modes
+            .iter()
+            .enumerate()
+            .map(|(i, m)| if i as i32 == d.active_mode { format!("[{}]", m.name) } else { m.name.clone() })
+            .collect();
+        println!("    modes: {}", modes.join(", "));
+    }
+    let profiles = c.profiles()?;
+    if !profiles.is_empty() {
+        println!("\nprofiles: {}", profiles.join(", "));
+    }
+    Ok(())
+}
+
+fn rgb_set(server: &str, device: u32, color: &str, zone: Option<u32>) -> anyhow::Result<()> {
+    use neru_core::rgb::{Color, OpenRgbClient};
+    let hex = if color.starts_with('#') { color.to_string() } else { format!("#{color}") };
+    let col = Color::from_hex(&hex).ok_or_else(|| anyhow::anyhow!("bad colour {color} (use rrggbb)"))?;
+    let mut c = OpenRgbClient::connect(server)?;
+    let d = c.controller(device)?;
+    c.set_custom_mode(device)?;
+    match zone {
+        Some(z) => {
+            let n = d.zones.get(z as usize).map(|z| z.leds_count).ok_or_else(|| anyhow::anyhow!("device has no zone {z}"))? as usize;
+            c.update_zone_leds(device, z, &vec![col; n])?;
+            println!("{}: zone {z} → {hex}", d.name);
+        }
+        None => {
+            c.update_leds(device, &vec![col; d.leds.len()])?;
+            println!("{}: {} LEDs → {hex}", d.name, d.leds.len());
+        }
+    }
+    Ok(())
 }
 
 fn fake_snapshot() -> Snapshot {

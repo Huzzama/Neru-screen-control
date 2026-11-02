@@ -151,6 +151,11 @@ impl Engine {
         self.metrics.read().map(|s| s.clone()).unwrap_or_default()
     }
 
+    /// The live metrics shared with other engines (RGB effects read it too).
+    pub fn metrics_shared(&self) -> Arc<RwLock<Snapshot>> {
+        self.metrics.clone()
+    }
+
     pub fn stop(&mut self) {
         let _ = self.tx.send(Command::Stop);
         if let Some(h) = self.handle.take() {

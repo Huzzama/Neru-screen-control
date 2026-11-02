@@ -4,6 +4,7 @@
 //! * [`metrics`] — CPU / GPU / RAM readings from sysfs, procfs and NVML
 //! * [`render`]  — theme model and renderer (SVG via resvg + raster media)
 //! * [`engine`]  — the loop that renders a theme and pushes it to a screen
+//! * [`rgb`]     — OpenRGB SDK client, lighting effects and the RGB engine
 //! * [`config`]  — on-disk configuration (`~/.config/neru-screen-control/`)
 
 pub mod autostart;
@@ -13,6 +14,7 @@ pub mod error;
 pub mod hidraw;
 pub mod metrics;
 pub mod render;
+pub mod rgb;
 pub mod screen;
 pub mod themes;
 

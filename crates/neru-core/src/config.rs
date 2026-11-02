@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::rgb::RgbConfig;
 use crate::screen::thermalright::Calibration;
 use crate::{Error, Result};
 
@@ -116,6 +117,7 @@ pub struct AppConfig {
     pub screen: ScreenConfig,
     pub metrics: MetricsConfig,
     pub app: AppBehavior,
+    pub rgb: RgbConfig,
 }
 
 impl AppConfig {

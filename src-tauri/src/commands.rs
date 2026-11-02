@@ -322,6 +322,105 @@ pub fn theme_thumbnail(state: State<AppState>, id: String, max: u32) -> Res<Stri
     Ok(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(&jpeg)))
 }
 
+// ── RGB ─────────────────────────────────────────────────────────────────────
+
+use neru_core::rgb::{Assignment, Effect, RgbCommand, RgbStatus};
+
+#[tauri::command]
+pub fn rgb_status(state: State<AppState>) -> RgbStatus {
+    state.rgb_status()
+}
+
+/// Set (or clear with `effect: null`) the effect of a zone (`zone: null` = whole device).
+#[tauri::command]
+pub fn rgb_set_assignment(state: State<AppState>, controller: String, zone: Option<u32>, effect: Option<Effect>) -> Res<()> {
+    let mut cfg = state.config.lock().map_err(err)?.clone();
+    cfg.rgb.assignments.retain(|a| !(a.controller == controller && a.zone == zone));
+    if let Some(effect) = effect {
+        // A device-wide assignment replaces zone-specific ones.
+        if zone.is_none() {
+            cfg.rgb.assignments.retain(|a| a.controller != controller);
+        }
+        cfg.rgb.assignments.push(Assignment { controller, zone, effect });
+    }
+    state.apply_config(cfg)
+}
+
+/// The same effect on every device OpenRGB knows about.
+#[tauri::command]
+pub fn rgb_apply_all(state: State<AppState>, effect: Effect) -> Res<()> {
+    let keys: Vec<String> = state.rgb_status().controllers.into_iter().map(|c| c.key).collect();
+    let mut cfg = state.config.lock().map_err(err)?.clone();
+    cfg.rgb.assignments.retain(|a| !keys.contains(&a.controller));
+    for k in keys {
+        cfg.rgb.assignments.push(Assignment { controller: k, zone: None, effect: effect.clone() });
+    }
+    state.apply_config(cfg)
+}
+
+#[tauri::command]
+pub fn rgb_clear_all(state: State<AppState>) -> Res<()> {
+    let mut cfg = state.config.lock().map_err(err)?.clone();
+    cfg.rgb.assignments.clear();
+    state.apply_config(cfg)
+}
+
+#[tauri::command]
+pub fn rgb_refresh(state: State<AppState>) {
+    state.send_rgb(RgbCommand::Refresh);
+}
+
+#[tauri::command]
+pub fn rgb_rescan(state: State<AppState>) {
+    state.send_rgb(RgbCommand::Rescan);
+}
+
+/// `op`: load | save | delete.
+#[tauri::command]
+pub fn rgb_profile(state: State<AppState>, op: String, name: String) -> Res<()> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("profile name is empty".into());
+    }
+    let cmd = match op.as_str() {
+        "load" => RgbCommand::LoadProfile(name),
+        "save" => RgbCommand::SaveProfile(name),
+        "delete" => RgbCommand::DeleteProfile(name),
+        _ => return Err(format!("unknown profile op {op}")),
+    };
+    state.send_rgb(cmd);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn rgb_save_to_device(state: State<AppState>, controller: String) {
+    state.send_rgb(RgbCommand::SaveToDevice(controller));
+}
+
+/// Start `openrgb --server` now (if installed).
+#[tauri::command]
+pub fn rgb_start_server(state: State<AppState>) -> Res<String> {
+    let Some(bin) = crate::state::which("openrgb") else {
+        return Err("OpenRGB is not installed (pacman -S openrgb)".into());
+    };
+    let mut child = state.rgb_server.lock().map_err(err)?;
+    if let Some(c) = child.as_mut() {
+        if c.try_wait().map_err(err)?.is_none() {
+            return Ok("already running".into());
+        }
+    }
+    let c = std::process::Command::new(&bin)
+        .args(["--server", "--noautoconnect"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(err)?;
+    *child = Some(c);
+    state.send_rgb(RgbCommand::Refresh);
+    Ok(format!("started {}", bin.display()))
+}
+
 #[tauri::command]
 pub fn quit_app(app: AppHandle, state: State<AppState>) {
     state.quitting.store(true, Ordering::Relaxed);
