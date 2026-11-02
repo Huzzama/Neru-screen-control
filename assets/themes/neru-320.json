@@ -1,0 +1,24 @@
+{
+  "name": "Neru 320",
+  "version": 1,
+  "width": 320,
+  "height": 320,
+  "background": { "kind": "color", "color": "#0b0b14" },
+  "smoothing": 0.5,
+  "elements": [
+    { "id": "cpu-label", "type": "text", "x": 20, "y": 44, "text": "CPU", "font": "Inter", "size": 18, "weight": 700, "color": "#8b8aa8", "align": "left", "letter_spacing": 3 },
+    { "id": "cpu-temp", "type": "text", "x": 20, "y": 110, "text": "{cpu.temp:0}°", "font": "Rajdhani", "size": 76, "weight": 700, "color": "#ffffff", "align": "left",
+      "ramp_metric": "cpu.temp", "ramp": [ { "at": 50, "color": "#ffffff" }, { "at": 80, "color": "#ffc20e" }, { "at": 92, "color": "#ff3b5c" } ] },
+    { "id": "cpu-sub", "type": "text", "x": 300, "y": 110, "text": "{cpu.usage:0}%", "font": "JetBrains Mono", "size": 26, "weight": 700, "color": "#ffc20e", "align": "right" },
+    { "id": "cpu-bar", "type": "bar", "x": 20, "y": 122, "w": 280, "h": 10, "metric": "cpu.usage", "min": 0, "max": 100, "color": "#ffc20e", "track": "#1f1d33", "radius": 5 },
+
+    { "id": "gpu-label", "type": "text", "x": 20, "y": 176, "text": "GPU", "font": "Inter", "size": 18, "weight": 700, "color": "#8b8aa8", "align": "left", "letter_spacing": 3 },
+    { "id": "gpu-temp", "type": "text", "x": 20, "y": 242, "text": "{gpu.temp:0}°", "font": "Rajdhani", "size": 76, "weight": 700, "color": "#ffffff", "align": "left",
+      "ramp_metric": "gpu.temp", "ramp": [ { "at": 50, "color": "#ffffff" }, { "at": 80, "color": "#c77dff" }, { "at": 92, "color": "#ff3b5c" } ] },
+    { "id": "gpu-sub", "type": "text", "x": 300, "y": 242, "text": "{gpu.usage:0}%", "font": "JetBrains Mono", "size": 26, "weight": 700, "color": "#9b30ff", "align": "right" },
+    { "id": "gpu-bar", "type": "bar", "x": 20, "y": 254, "w": 280, "h": 10, "metric": "gpu.usage", "min": 0, "max": 100, "color": "#9b30ff", "track": "#1f1d33", "radius": 5 },
+
+    { "id": "ram-text", "type": "text", "x": 20, "y": 300, "text": "RAM {mem.pct:0}%", "font": "JetBrains Mono", "size": 15, "weight": 400, "color": "#8b8aa8", "align": "left" },
+    { "id": "clock", "type": "text", "x": 300, "y": 300, "text": "{time:%H:%M}", "font": "JetBrains Mono", "size": 15, "weight": 700, "color": "#c9c8dc", "align": "right" }
+  ]
+}

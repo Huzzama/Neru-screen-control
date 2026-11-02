@@ -18,6 +18,8 @@ rusb = "0.9"
 jpeg-encoder = { version = "0.7", features = ["simd"] }
 directories = "6"
 nvml-wrapper = { version = "0.13", optional = true }
+resvg = { version = "0.49", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 
 [features]
 default = ["nvidia"]

@@ -60,12 +60,27 @@ neru metrics --watch    # CPU / GPU / RAM readings the themes can use
 
 Set `NERU_LOG=debug` to see every command and reply.
 
+## Themes
+
+Themes are JSON (text, bars, arc gauges, shapes, images, GIFs, video) rendered
+by the app and sent to the screen. Format: [`docs/THEMES.md`](docs/THEMES.md).
+
+```bash
+neru theme ls                                        # bundled themes (assets/themes)
+neru theme render assets/themes/neru-720.json -o frame.png --fake   # preview without a screen
+neru theme run assets/themes/neru-720.json           # live metrics on the screen, Ctrl-C to stop
+neru fonts                                           # font families themes can use
+```
+
+Video backgrounds need `ffmpeg`.
+
 ## Project layout
 
 ```
-crates/neru-core   drivers (screen/), metrics/, config
+crates/neru-core   drivers (screen/), metrics/, render/ (themes), engine (render loop), config
 crates/neru-cli    the `neru` tool
-docs/              protocol notes
+assets/            bundled fonts (OFL) and themes
+docs/              protocol and theme format notes
 packaging/         udev rules, desktop entry, service unit, distro packaging
 ```
 

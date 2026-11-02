@@ -21,7 +21,9 @@ use anyhow::{bail, Context};
 use clap::{Parser, Subcommand};
 use image::{AnimationDecoder, RgbImage};
 
-use neru_core::metrics::Sources;
+use neru_core::engine::{Engine, EngineConfig};
+use neru_core::metrics::{Snapshot, Sources};
+use neru_core::render::{FontBook, Renderer};
 use neru_core::screen::{self, Screen};
 
 #[derive(Parser)]
@@ -76,6 +78,39 @@ enum Cmd {
         #[arg(long)]
         install: bool,
     },
+    /// Themes: list, render to PNG, or run on the screen
+    #[command(subcommand)]
+    Theme(ThemeCmd),
+    /// List font families available to themes
+    Fonts,
+}
+
+#[derive(Subcommand)]
+enum ThemeCmd {
+    /// List bundled themes
+    Ls,
+    /// Render one frame of a theme to a PNG (no screen needed)
+    Render {
+        file: PathBuf,
+        #[arg(short, long, default_value = "frame.png")]
+        out: PathBuf,
+        /// Use made-up metric values instead of real ones (repeatable output)
+        #[arg(long)]
+        fake: bool,
+        /// Render N frames and report timing
+        #[arg(long, default_value_t = 1)]
+        bench: u32,
+    },
+    /// Run a theme on the screen with live metrics until Ctrl-C
+    Run {
+        file: PathBuf,
+        #[arg(long, default_value_t = 10)]
+        fps: u32,
+        #[arg(long, default_value_t = 100)]
+        brightness: u8,
+        #[arg(long, default_value_t = 0)]
+        rotation: u16,
+    },
 }
 
 fn main() {
@@ -117,7 +152,121 @@ fn run() -> anyhow::Result<()> {
         }
         Cmd::Metrics { watch, json } => metrics(watch, json),
         Cmd::Udev { install } => udev(install),
+        Cmd::Theme(ThemeCmd::Ls) => theme_ls(),
+        Cmd::Theme(ThemeCmd::Render { file, out, fake, bench }) => theme_render(&file, &out, fake, bench),
+        Cmd::Theme(ThemeCmd::Run { file, fps, brightness, rotation }) => theme_run(cli.model, &file, fps, brightness, rotation),
+        Cmd::Fonts => {
+            let fonts = FontBook::load(None);
+            for f in fonts.families() {
+                println!("{f}");
+            }
+            Ok(())
+        }
     }
+}
+
+fn fake_snapshot() -> Snapshot {
+    use neru_core::metrics::{CpuMetrics, GpuMetrics, GpuVendor, MemMetrics};
+    Snapshot {
+        uptime_s: 0.0,
+        cpu: CpuMetrics {
+            name: "AMD Ryzen 7 7800X3D 8-Core Processor".into(),
+            temp_c: Some(67.4),
+            usage_pct: Some(38.0),
+            freq_mhz: Some(4850.0),
+            power_w: Some(74.0),
+        },
+        gpu: Some(GpuMetrics {
+            vendor: Some(GpuVendor::Amd),
+            name: "Radeon RX 7800 XT".into(),
+            temp_c: Some(58.0),
+            usage_pct: Some(91.0),
+            core_mhz: Some(2430.0),
+            mem_mhz: Some(1218.0),
+            power_w: Some(212.0),
+            vram_used_mb: Some(9120.0),
+            vram_total_mb: Some(16368.0),
+        }),
+        mem: MemMetrics { used_mb: 13850.0, total_mb: 32048.0, pct: 43.2 },
+    }
+}
+
+fn theme_ls() -> anyhow::Result<()> {
+    let themes = neru_core::render::bundled_themes();
+    if themes.is_empty() {
+        println!("no bundled themes found (set NERU_ASSETS to the assets directory)");
+    }
+    for p in themes {
+        match neru_core::render::load_theme(&p) {
+            Ok(t) => println!("{:<14} {}×{:<5} {} elements   {}", t.name, t.width, t.height, t.elements.len(), p.display()),
+            Err(e) => println!("{}: {e}", p.display()),
+        }
+    }
+    Ok(())
+}
+
+fn theme_render(file: &PathBuf, out: &PathBuf, fake: bool, bench: u32) -> anyhow::Result<()> {
+    let theme = neru_core::render::load_theme(file)?;
+    let fonts = FontBook::load(None);
+    let mut renderer = Renderer::new(theme, fonts.db.clone(), None)?;
+    let snapshot = if fake {
+        fake_snapshot()
+    } else {
+        let mut src = Sources::new();
+        let _ = src.read();
+        std::thread::sleep(Duration::from_millis(300));
+        src.read()
+    };
+    let started = Instant::now();
+    let n = bench.max(1);
+    for _ in 0..n {
+        renderer.render(&snapshot)?;
+    }
+    let per = started.elapsed().as_secs_f64() * 1000.0 / n as f64;
+    let frame = renderer.render(&snapshot)?;
+    frame.save(out).with_context(|| format!("writing {}", out.display()))?;
+    eprintln!(
+        "{} → {} ({}×{}) {per:.1} ms/frame (svg {:.1} ms, media {:.1} ms)",
+        file.display(),
+        out.display(),
+        frame.width(),
+        frame.height(),
+        renderer.stats.svg_ms,
+        renderer.stats.media_ms
+    );
+    for (p, e) in renderer.media_errors() {
+        eprintln!("media error: {p}: {e}");
+    }
+    Ok(())
+}
+
+fn theme_run(model: Option<String>, file: &PathBuf, fps: u32, brightness: u8, rotation: u16) -> anyhow::Result<()> {
+    let theme = neru_core::render::load_theme(file)?;
+    let fonts = Arc::new(FontBook::load(None));
+    let cfg = EngineConfig { fps, brightness, rotation, model, ..Default::default() };
+    let engine = Engine::start(cfg, theme, fonts, None)?;
+    eprintln!("running {} (Ctrl-C to stop)", file.display());
+    let stop = ctrl_c_flag();
+    let mut last_connected = None;
+    while !stop.load(Ordering::Relaxed) {
+        let st = engine.status();
+        if last_connected != Some(st.connected) {
+            last_connected = Some(st.connected);
+            match &st.screen {
+                Some(s) => eprintln!("connected: {} {} ({}×{})", s.vendor, s.name, s.width, s.height),
+                None => eprintln!(
+                    "no screen: {}{}",
+                    st.last_error.clone().unwrap_or_else(|| "waiting for a screen…".into()),
+                    if st.needs_udev { " (install the udev rules: neru udev --install)" } else { "" }
+                ),
+            }
+        }
+        if st.connected && st.frames > 0 && st.frames % 50 == 0 {
+            eprintln!("{} frames, {:.1} fps, render {:.1} ms, send {:.1} ms", st.frames, st.fps_actual, st.render_ms, st.send_ms);
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    Ok(())
 }
 
 fn devices() -> anyhow::Result<()> {
