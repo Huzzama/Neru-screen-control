@@ -1,0 +1,20 @@
+[package]
+name = "neru-fand"
+description = "Root helper for Neru Screen Control: applies fan curves through hwmon and serves a Unix socket"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "neru-fand"
+path = "src/main.rs"
+
+[dependencies]
+neru-core = { path = "../neru-core", default-features = false }
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"

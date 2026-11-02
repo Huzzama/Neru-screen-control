@@ -10,7 +10,7 @@
 > **v2 is a rewrite in Rust + Tauri.** The Python/PySide6 app (v1.x) is in the
 > git history and in the [1.x releases](https://github.com/Huzzama/Neru-screen-control/releases).
 > v2 ships the desktop app (screen themes editor, live preview, tray, RGB through
-> OpenRGB), the core library and the `neru` command-line tool. Fan control is next.
+> OpenRGB, fan curves), the core library and the `neru` command-line tool.
 
 ## The app
 
@@ -22,6 +22,9 @@
   pump, RAM, GPU…): per-zone software effects (static, breathing, rainbow, colour
   cycle, temperature-reactive) or device-native modes, OpenRGB profiles. See
   [`docs/RGB.md`](docs/RGB.md).
+* **Fans** — fan and pump curves on every hwmon PWM channel, driven by any
+  temperature (CPU, GPU, NVMe, Super I/O…), applied by a small root helper that
+  keeps working with the app closed. See [`docs/FANS.md`](docs/FANS.md).
 * **Settings** — start on login (tray), frame rate, JPEG quality, Fahrenheit, udev
   rules installer, Thermalright calibration.
 * Runs in the tray; `neru-screen-control --background` starts hidden (what the
@@ -102,8 +105,9 @@ Video backgrounds need `ffmpeg`. RGB needs OpenRGB with its SDK server (`docs/RG
 ## Project layout
 
 ```
-crates/neru-core   drivers (screen/), metrics/, render/ (themes), engine (render loop), config, theme store
+crates/neru-core   drivers (screen/), metrics/, render/ (themes), engine (render loop), rgb/, fans/, config, theme store
 crates/neru-cli    the `neru` tool
+crates/neru-fand   the root fan helper (systemd service)
 src-tauri/         the desktop app (Tauri 2): commands, tray, background mode
 ui/                the app's UI (React + TypeScript + Vite)
 assets/            bundled fonts (OFL) and themes

@@ -196,6 +196,22 @@ export interface RgbController {
   key: string; index: number; name: string; vendor: string; kind: string; description: string; location: string; version: string; serial: string;
   active_mode: number; modes: RgbMode[]; zones: RgbZone[]; leds: number; software: boolean;
 }
+// ── Fans ────────────────────────────────────────────────────────────────────
+export interface FanSensor { id: string; chip: string; label: string; temp_c: number | null }
+export interface FanChannel { id: string; chip: string; index: number; label: string; pwm: number | null; rpm: number | null; enable: number | null; writable: boolean }
+export type FanChannelMode =
+  | { mode: "auto" }
+  | { mode: "fixed"; pct: number }
+  | { mode: "curve"; sensor: string; points: [number, number][] | number[][]; min_pct: number; slew_pct_per_s: number };
+export interface FanChannelConfig { id: string; name: string | null; mode: FanChannelMode }
+export interface FanConfig { channels: FanChannelConfig[] }
+export interface FanChannelState { id: string; target_pct: number | null; sensor_temp: number | null; error: string | null }
+export interface FanStatus {
+  helper: boolean; helper_version: string | null; helper_binary: string | null;
+  inventory: { sensors: FanSensor[]; channels: FanChannel[] };
+  config: FanConfig; states: FanChannelState[]; error: string | null; presets: [string, [number, number][]][];
+}
+
 export interface RgbStatus { enabled: boolean; connected: boolean; server: string; protocol: number; error: string | null; controllers: RgbController[]; profiles: string[]; fps_actual: number; last_message: string | null }
 export interface PreviewFrame { data: string; width: number; height: number; seq: number }
 
@@ -238,6 +254,11 @@ export const api = {
   rgbSaveToDevice: (controller: string) => invoke<void>("rgb_save_to_device", { controller }),
   rgbStartServer: () => invoke<string>("rgb_start_server"),
   onRgbStatus: (cb: (s: RgbStatus) => void): Promise<UnlistenFn> => listen<RgbStatus>("rgb-status", (e) => cb(e.payload)),
+  fansStatus: () => invoke<FanStatus>("fans_status"),
+  fansSetConfig: (config: FanConfig) => invoke<void>("fans_set_config", { config }),
+  fansRelease: () => invoke<void>("fans_release"),
+  fansInstallHelper: () => invoke<string>("fans_install_helper"),
+  fansUninstallHelper: () => invoke<string>("fans_uninstall_helper"),
   quit: () => invoke<void>("quit_app"),
   onPreview: (cb: (f: PreviewFrame) => void): Promise<UnlistenFn> => listen<PreviewFrame>("preview-frame", (e) => cb(e.payload)),
   onStatus: (cb: (s: EngineStatus) => void): Promise<UnlistenFn> => listen<EngineStatus>("status", (e) => cb(e.payload)),

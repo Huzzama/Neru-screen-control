@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../ui/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm --prefix ui run dev",
-    "beforeBuildCommand": "npm --prefix ui run build"
+    "beforeDevCommand": "sh scripts/build-fand.sh debug && npm --prefix ui run dev",
+    "beforeBuildCommand": "sh scripts/build-fand.sh && npm --prefix ui run build"
   },
   "app": {
     "windows": [
@@ -27,17 +27,28 @@
       "csp": "default-src 'self'; img-src 'self' data: blob: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost",
       "assetProtocol": {
         "enable": true,
-        "scope": ["$HOME/.config/neru-screen-control/**", "$HOME/.config/neru-screen-control/media/**"]
+        "scope": [
+          "$HOME/.config/neru-screen-control/**",
+          "$HOME/.config/neru-screen-control/media/**"
+        ]
       }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "appimage"],
+    "targets": [
+      "deb",
+      "appimage"
+    ],
     "category": "Utility",
     "shortDescription": "Cooler LCD screens, PC RGB lighting and fans",
-    "longDescription": "Drive Thermaltake and Thermalright cooler LCD screens with live system metrics and custom themes, control PC RGB lighting through OpenRGB and manage fan curves — on Linux.",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png"],
+    "longDescription": "Drive Thermaltake and Thermalright cooler LCD screens with live system metrics and custom themes, control PC RGB lighting through OpenRGB and manage fan curves \u2014 on Linux.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ],
     "resources": {
       "../assets/fonts/": "assets/fonts/",
       "../assets/themes/": "assets/themes/",
@@ -45,15 +56,23 @@
     },
     "linux": {
       "deb": {
-        "depends": ["libusb-1.0-0", "libwebkit2gtk-4.1-0", "libgtk-3-0"],
+        "depends": [
+          "libusb-1.0-0",
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ],
         "section": "utils",
         "files": {
-          "/usr/lib/udev/rules.d/70-neru-screen-control.rules": "../packaging/shared/70-neru-screen-control.rules"
+          "/usr/lib/udev/rules.d/70-neru-screen-control.rules": "../packaging/shared/70-neru-screen-control.rules",
+          "/usr/lib/systemd/system/neru-fand.service": "../packaging/shared/neru-fand.service"
         }
       },
       "appimage": {
         "bundleMediaFramework": false
       }
-    }
+    },
+    "externalBin": [
+      "binaries/neru-fand"
+    ]
   }
 }

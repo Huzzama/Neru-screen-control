@@ -5,12 +5,14 @@
 //! * [`render`]  — theme model and renderer (SVG via resvg + raster media)
 //! * [`engine`]  — the loop that renders a theme and pushes it to a screen
 //! * [`rgb`]     — OpenRGB SDK client, lighting effects and the RGB engine
+//! * [`fans`]    — hwmon fan curves and the `neru-fand` root helper protocol
 //! * [`config`]  — on-disk configuration (`~/.config/neru-screen-control/`)
 
 pub mod autostart;
 pub mod config;
 pub mod engine;
 pub mod error;
+pub mod fans;
 pub mod hidraw;
 pub mod metrics;
 pub mod render;

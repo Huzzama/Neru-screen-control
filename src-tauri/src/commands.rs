@@ -421,6 +421,137 @@ pub fn rgb_start_server(state: State<AppState>) -> Res<String> {
     Ok(format!("started {}", bin.display()))
 }
 
+// ── Fans ────────────────────────────────────────────────────────────────────
+
+use neru_core::fans::{self, daemon as fand, FanConfig};
+
+#[derive(Serialize)]
+pub struct FanStatus {
+    /// The root helper answers on its socket.
+    pub helper: bool,
+    pub helper_version: Option<String>,
+    pub helper_binary: Option<String>,
+    pub inventory: fans::Inventory,
+    pub config: FanConfig,
+    pub states: Vec<fans::ChannelState>,
+    pub error: Option<String>,
+    pub presets: Vec<(String, Vec<[f32; 2]>)>,
+}
+
+fn helper_binary() -> Option<PathBuf> {
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let candidates = [
+        exe_dir.join("neru-fand"),
+        exe_dir.join("neru-fand-x86_64-unknown-linux-gnu"),
+        PathBuf::from("/usr/bin/neru-fand"),
+        PathBuf::from("/usr/local/bin/neru-fand"),
+    ];
+    candidates.into_iter().find(|p| p.is_file()).or_else(|| crate::state::which("neru-fand"))
+}
+
+#[tauri::command]
+pub fn fans_status() -> FanStatus {
+    let presets = fans::presets().into_iter().map(|(n, p)| (n.to_string(), p)).collect();
+    let socket = Path::new(fand::SOCKET_PATH);
+    match fand::call(socket, &fand::Request::Status) {
+        Ok(r) if r.ok => {
+            let st = r.status.unwrap_or_else(|| fand::StatusReply {
+                version: String::new(),
+                uptime_s: 0,
+                inventory: fans::Inventory::default(),
+                config: FanConfig::default(),
+                states: Vec::new(),
+            });
+            FanStatus {
+                helper: true,
+                helper_version: Some(st.version),
+                helper_binary: helper_binary().map(|p| p.display().to_string()),
+                inventory: st.inventory,
+                config: st.config,
+                states: st.states,
+                error: None,
+                presets,
+            }
+        }
+        Ok(r) => FanStatus {
+            helper: true,
+            helper_version: None,
+            helper_binary: helper_binary().map(|p| p.display().to_string()),
+            inventory: fans::discover(Path::new(fans::DEFAULT_HWMON_ROOT)),
+            config: FanConfig::default(),
+            states: Vec::new(),
+            error: r.error,
+            presets,
+        },
+        Err(e) => FanStatus {
+            helper: false,
+            helper_version: None,
+            helper_binary: helper_binary().map(|p| p.display().to_string()),
+            inventory: fans::discover(Path::new(fans::DEFAULT_HWMON_ROOT)),
+            config: FanConfig::default(),
+            states: Vec::new(),
+            error: Some(e.to_string()),
+            presets,
+        },
+    }
+}
+
+#[tauri::command]
+pub fn fans_set_config(config: FanConfig) -> Res<()> {
+    let r = fand::call(Path::new(fand::SOCKET_PATH), &fand::Request::Set { config }).map_err(err)?;
+    if r.ok {
+        Ok(())
+    } else {
+        Err(r.error.unwrap_or_else(|| "helper refused the configuration".into()))
+    }
+}
+
+#[tauri::command]
+pub fn fans_release() -> Res<()> {
+    let r = fand::call(Path::new(fand::SOCKET_PATH), &fand::Request::Release).map_err(err)?;
+    if r.ok {
+        Ok(())
+    } else {
+        Err(r.error.unwrap_or_default())
+    }
+}
+
+/// Install the root helper as a systemd service (asks for the password).
+#[tauri::command]
+pub fn fans_install_helper() -> Res<String> {
+    let src = helper_binary().ok_or("the neru-fand binary was not found next to the app")?;
+    // A packaged install (/usr/bin) is used in place; anything else (dev build,
+    // AppImage mount) is copied somewhere that outlives the app.
+    let (copy, exec) = if src.starts_with("/usr/bin") || src.starts_with("/usr/local/bin") {
+        (String::new(), src.display().to_string())
+    } else {
+        (format!("install -Dm755 '{}' /usr/local/bin/neru-fand\n", src.display()), "/usr/local/bin/neru-fand".to_string())
+    };
+    let unit = fand::unit_file(&exec);
+    let script = format!(
+        "set -e\n{copy}mkdir -p /etc/neru-screen-control\ncat > /etc/systemd/system/{u} <<'EOF'\n{unit}EOF\nsystemctl daemon-reload\nsystemctl enable --now {u}\n",
+        u = fand::UNIT_NAME
+    );
+    let status = std::process::Command::new("pkexec").args(["sh", "-c", &script]).status().map_err(|e| format!("pkexec: {e}"))?;
+    if !status.success() {
+        return Err(format!("installation failed ({status})"));
+    }
+    Ok("helper installed and started".into())
+}
+
+#[tauri::command]
+pub fn fans_uninstall_helper() -> Res<String> {
+    let script = format!(
+        "set -e\nsystemctl disable --now {u} || true\nrm -f /etc/systemd/system/{u} /usr/local/bin/neru-fand /run/neru-fand.sock\nsystemctl daemon-reload\n",
+        u = fand::UNIT_NAME
+    );
+    let status = std::process::Command::new("pkexec").args(["sh", "-c", &script]).status().map_err(|e| format!("pkexec: {e}"))?;
+    if !status.success() {
+        return Err(format!("removal failed ({status})"));
+    }
+    Ok("helper removed; fans are back under BIOS control".into())
+}
+
 #[tauri::command]
 pub fn quit_app(app: AppHandle, state: State<AppState>) {
     state.quitting.store(true, Ordering::Relaxed);

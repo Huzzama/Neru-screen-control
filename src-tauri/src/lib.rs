@@ -162,6 +162,11 @@ pub fn run() {
             commands::rgb_profile,
             commands::rgb_save_to_device,
             commands::rgb_start_server,
+            commands::fans_status,
+            commands::fans_set_config,
+            commands::fans_release,
+            commands::fans_install_helper,
+            commands::fans_uninstall_helper,
             commands::quit_app,
         ])
         .build(tauri::generate_context!())

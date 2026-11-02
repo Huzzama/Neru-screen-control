@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/neru-core",
     "crates/neru-cli",
+    "crates/neru-fand",
     "src-tauri",
 ]
 

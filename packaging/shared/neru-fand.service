@@ -1,0 +1,16 @@
+[Unit]
+Description=Neru Screen Control fan helper (hwmon PWM)
+Documentation=https://github.com/Huzzama/Neru-screen-control
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/neru-fand
+Restart=always
+RestartSec=2
+# Fans go back to the BIOS when the helper stops (see Controller::drop).
+KillSignal=SIGTERM
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target
