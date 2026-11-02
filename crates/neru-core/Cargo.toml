@@ -1,0 +1,24 @@
+[package]
+name = "neru-core"
+description = "Core library for Neru Screen Control: cooler LCD drivers, metrics, theme renderer, RGB and fan control"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+image.workspace = true
+libc = "0.2"
+rusb = "0.9"
+jpeg-encoder = { version = "0.7", features = ["simd"] }
+directories = "6"
+nvml-wrapper = { version = "0.13", optional = true }
+
+[features]
+default = ["nvidia"]
+nvidia = ["dep:nvml-wrapper"]

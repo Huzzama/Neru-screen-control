@@ -1,0 +1,11 @@
+# Neru Screen Control — cooler LCD screens
+# Install: sudo cp 70-neru-screen-control.rules /etc/udev/rules.d/
+#          sudo udevadm control --reload-rules && sudo udevadm trigger
+# Then unplug and replug the USB cable (or reboot).
+
+# Thermaltake TH360 / TH420 V3 Ultra ARGB Sync (3.95" 720×720)
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="264a", ATTRS{idProduct}=="2348", MODE="0660", TAG+="uaccess"
+# Thermaltake LCD Panel Kit 6" (View 600 TG, 1110×540)
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="264a", ATTRS{idProduct}=="2347", MODE="0660", TAG+="uaccess"
+# Thermalright ChiZhu USBDISPLAY (Frozen Warframe class, 320×320)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="87ad", ATTRS{idProduct}=="70db", MODE="0660", TAG+="uaccess"
