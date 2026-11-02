@@ -1,13 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Neru Screen Control",
+  "productName": "neru-screen-control",
   "identifier": "io.github.huzzama.neru",
   "mainBinaryName": "neru-screen-control",
   "build": {
     "frontendDist": "../ui/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "sh scripts/build-fand.sh debug && npm --prefix ui run dev",
-    "beforeBuildCommand": "sh scripts/build-fand.sh && npm --prefix ui run build"
+    "beforeDevCommand": "sh scripts/build-bins.sh debug && npm --prefix ui run dev",
+    "beforeBuildCommand": "sh scripts/build-bins.sh && npm --prefix ui run build"
   },
   "app": {
     "windows": [
@@ -65,14 +65,17 @@
         "files": {
           "/usr/lib/udev/rules.d/70-neru-screen-control.rules": "../packaging/shared/70-neru-screen-control.rules",
           "/usr/lib/systemd/system/neru-fand.service": "../packaging/shared/neru-fand.service"
-        }
+        },
+        "postInstallScript": "../packaging/debian/postinst",
+        "desktopTemplate": "../packaging/shared/neru-screen-control.desktop"
       },
       "appimage": {
         "bundleMediaFramework": false
       }
     },
     "externalBin": [
-      "binaries/neru-fand"
+      "binaries/neru-fand",
+      "binaries/neru"
     ]
   }
 }

@@ -1,73 +1,63 @@
 # Maintainer: Huzzama <chewbaccanator0405@gmail.com>
 pkgname=neru-screen-control
-pkgver=1.0.0
+pkgver=2.0.0alpha1
 pkgrel=1
-pkgdesc="LCD display controller for Thermalright USB cooler screens"
-arch=('any')
+pkgdesc="Cooler LCD screens (Thermaltake, Thermalright), PC RGB lighting via OpenRGB and fan curves — one app"
+arch=('x86_64')
 url="https://github.com/Huzzama/Neru-screen-control"
 license=('MIT')
-depends=(
-  'python>=3.10'
-  'python-pip'
-  'libusb'
-  'polkit'
-)
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'librsvg' 'libusb' 'polkit')
 optdepends=(
-  'python-pyside6: graphical user interface'
-  'python-pillow: image and frame rendering'
-  'python-opencv: video playback support'
-  'python-pynvml: NVIDIA GPU metrics'
+  'openrgb: RGB lighting control'
+  'ffmpeg: video backgrounds on the screen'
 )
-source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP')  # Replace with: sha256sum neru-screen-control-*.tar.gz
+makedepends=('cargo' 'rust' 'nodejs' 'npm' 'pkgconf')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v2.0.0-alpha.1.tar.gz")
+sha256sums=('SKIP')
+
+_srcdir="Neru-screen-control-2.0.0-alpha.1"
 
 prepare() {
-  cd "$srcdir/Neru-screen-control-$pkgver"
-  # Install Python dependencies into a local venv for packaging
-  python3 -m venv .venv
-  .venv/bin/pip install -r requirements.txt --quiet --no-cache-dir
+  cd "$srcdir/$_srcdir"
+  npm install --no-audit --no-fund
+}
+
+build() {
+  cd "$srcdir/$_srcdir"
+  npm --prefix ui run build
+  cargo build --release --locked -p neru-screen-control -p neru-cli -p neru-fand
+}
+
+check() {
+  cd "$srcdir/$_srcdir"
+  cargo test --release --locked -p neru-core
 }
 
 package() {
-  cd "$srcdir/Neru-screen-control-$pkgver"
+  cd "$srcdir/$_srcdir"
+  install -Dm755 target/release/neru-screen-control "$pkgdir/usr/bin/neru-screen-control"
+  install -Dm755 target/release/neru              "$pkgdir/usr/bin/neru"
+  install -Dm755 target/release/neru-fand         "$pkgdir/usr/bin/neru-fand"
 
-  # Application source files
-  install -dm755 "$pkgdir/usr/share/$pkgname"
-  cp -r src main.py icon.png requirements.txt \
-    "$pkgdir/usr/share/$pkgname/"
+  # Bundled fonts and themes (found via /usr/share/neru-screen-control/assets)
+  install -dm755 "$pkgdir/usr/share/$pkgname/assets"
+  cp -r assets/fonts assets/themes "$pkgdir/usr/share/$pkgname/assets/"
 
-  # Copy venv (bundled dependencies)
-  cp -r .venv "$pkgdir/usr/share/$pkgname/venv"
-
-  # /usr/bin wrapper
-  install -dm755 "$pkgdir/usr/bin"
-  cat > "$pkgdir/usr/bin/$pkgname" << 'WRAPPER'
-#!/bin/bash
-exec /usr/share/neru-screen-control/venv/bin/python \
-     /usr/share/neru-screen-control/main.py "$@"
-WRAPPER
-  chmod +x "$pkgdir/usr/bin/$pkgname"
-
-  # Desktop launcher
-  install -Dm644 "packaging/shared/$pkgname.desktop" \
-    "$pkgdir/usr/share/applications/$pkgname.desktop"
-
-  # Icons (all sizes)
-  for size in 16 32 48 64 128 256; do
-    install -Dm644 \
-      "packaging/shared/icons/${size}x${size}/$pkgname.png" \
-      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/$pkgname.png"
+  install -Dm644 packaging/shared/$pkgname.desktop "$pkgdir/usr/share/applications/$pkgname.desktop"
+  for size in 32 128 256 512; do
+    case $size in
+      32)  src=src-tauri/icons/32x32.png ;;
+      128) src=src-tauri/icons/128x128.png ;;
+      256) src=src-tauri/icons/128x128@2x.png ;;
+      512) src=src-tauri/icons/icon.png ;;
+    esac
+    install -Dm644 "$src" "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/$pkgname.png"
   done
 
-  # udev rule
-  install -Dm644 "99-chizhou-display.rules" \
-    "$pkgdir/usr/lib/udev/rules.d/99-chizhou-display.rules"
+  install -Dm644 packaging/shared/70-neru-screen-control.rules "$pkgdir/usr/lib/udev/rules.d/70-neru-screen-control.rules"
+  # Fan helper unit — stays disabled until enabled from the app (Fans → Install helper)
+  install -Dm644 packaging/shared/neru-fand.service "$pkgdir/usr/lib/systemd/system/neru-fand.service"
 
-  # systemd service template (not enabled — user opts in via Settings)
-  install -Dm644 "packaging/shared/$pkgname.service" \
-    "$pkgdir/usr/share/$pkgname/$pkgname.service"
-
-  # License
-  install -Dm644 LICENSE \
-    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
 }

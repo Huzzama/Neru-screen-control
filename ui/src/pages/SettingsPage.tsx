@@ -97,6 +97,22 @@ export function SettingsPage({ status }: { status: EngineStatus }) {
       </div>
 
       <div className="card">
+        <div className="card-title" style={{ marginBottom: 12 }}>
+          RGB (OpenRGB)
+        </div>
+        <SwitchRow title="RGB control" desc="Connect to the OpenRGB SDK server and drive the lighting." on={config.rgb.enabled} onChange={(v) => save((c) => ({ ...c, rgb: { ...c.rgb, enabled: v } }))} />
+        <SwitchRow title="Start the OpenRGB server when needed" desc="Runs `openrgb --server` headless if nothing answers on the address below (OpenRGB must be installed)." on={config.rgb.start_server} onChange={(v) => save((c) => ({ ...c, rgb: { ...c.rgb, start_server: v } }))} />
+        <div className="grid grid-2" style={{ marginTop: 12 }}>
+          <Field label="Server address" hint="host:port of the OpenRGB SDK server.">
+            <input className="input mono" defaultValue={config.rgb.server} onBlur={(e) => e.target.value !== config.rgb.server && save((c) => ({ ...c, rgb: { ...c.rgb, server: e.target.value.trim() || "127.0.0.1:6742" } }))} />
+          </Field>
+          <Field label="Effect updates per second" hint="Lower this if a device lags (USB controllers are slow).">
+            <NumberInput value={config.rgb.fps} min={1} max={60} onChange={(fps) => save((c) => ({ ...c, rgb: { ...c.rgb, fps: Math.round(fps) } }))} />
+          </Field>
+        </div>
+      </div>
+
+      <div className="card">
         <div className="card-head">
           <div className="card-title">
             <Usb size={18} />
