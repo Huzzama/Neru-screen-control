@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Neru Screen Control",
+  "identifier": "io.github.huzzama.neru",
+  "mainBinaryName": "neru-screen-control",
+  "build": {
+    "frontendDist": "../ui/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm --prefix ui run dev",
+    "beforeBuildCommand": "npm --prefix ui run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Neru Screen Control",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 640,
+        "visible": false,
+        "decorations": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: blob: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$HOME/.config/neru-screen-control/**", "$HOME/.config/neru-screen-control/media/**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage"],
+    "category": "Utility",
+    "shortDescription": "Cooler LCD screens, PC RGB lighting and fans",
+    "longDescription": "Drive Thermaltake and Thermalright cooler LCD screens with live system metrics and custom themes, control PC RGB lighting through OpenRGB and manage fan curves — on Linux.",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png"],
+    "resources": {
+      "../assets/fonts/": "assets/fonts/",
+      "../assets/themes/": "assets/themes/",
+      "../packaging/shared/70-neru-screen-control.rules": "udev/70-neru-screen-control.rules"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libusb-1.0-0", "libwebkit2gtk-4.1-0", "libgtk-3-0"],
+        "section": "utils",
+        "files": {
+          "/usr/lib/udev/rules.d/70-neru-screen-control.rules": "../packaging/shared/70-neru-screen-control.rules"
+        }
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
+  }
+}

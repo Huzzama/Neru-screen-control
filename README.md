@@ -7,10 +7,21 @@
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 ![Platform](https://img.shields.io/badge/Platform-Linux-orange?logo=linux&logoColor=white)
 
-> **v2 is being rewritten in Rust + Tauri.** The Python/PySide6 app (v1.x) is in the
+> **v2 is a rewrite in Rust + Tauri.** The Python/PySide6 app (v1.x) is in the
 > git history and in the [1.x releases](https://github.com/Huzzama/Neru-screen-control/releases).
-> This branch currently ships the core library and the `neru` command-line tool;
-> the desktop app follows.
+> v2 ships the desktop app (screen themes editor, live preview, tray), the core
+> library and the `neru` command-line tool. RGB (via OpenRGB) and fan control are next.
+
+## The app
+
+* **Dashboard** — screen status, brightness and rotation, live preview, CPU / GPU / RAM tiles.
+* **Screen** — theme gallery and a live editor: text with metric placeholders, bars,
+  arc gauges, shapes, images, animated GIFs and video. Every edit is pushed to the
+  screen as you make it.
+* **Settings** — start on login (tray), frame rate, JPEG quality, Fahrenheit, udev
+  rules installer, Thermalright calibration.
+* Runs in the tray; `neru-screen-control --background` starts hidden (what the
+  autostart entry uses).
 
 ## Supported screens
 
@@ -24,19 +35,27 @@ Protocol notes: [`docs/PROTOCOLS.md`](docs/PROTOCOLS.md).
 
 ## Build from source
 
-Requirements: Rust 1.80+ (`rustup`), `pkg-config`, `libusb`.
+Requirements: Rust 1.80+ (`rustup`), Node.js 20+, and the Tauri Linux libraries.
 
 ```bash
 # Arch / CachyOS
-sudo pacman -S --needed rustup pkgconf libusb && rustup default stable
+sudo pacman -S --needed rustup nodejs npm base-devel pkgconf libusb webkit2gtk-4.1 gtk3 libayatana-appindicator librsvg
+rustup default stable
 # Debian / Ubuntu
-sudo apt install build-essential pkg-config libusb-1.0-0-dev && curl https://sh.rustup.rs -sSf | sh
+sudo apt install build-essential curl pkg-config libusb-1.0-0-dev libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev nodejs npm
+curl https://sh.rustup.rs -sSf | sh
 
 git clone https://github.com/Huzzama/Neru-screen-control.git
 cd Neru-screen-control
-cargo build --release
-./target/release/neru --help
+npm install                 # UI dependencies + the Tauri CLI
+
+npm run dev                 # the app, with hot reload of the UI
+npm run build               # release build → target/release/bundle/{deb,appimage}/
+cargo build --release -p neru-cli && ./target/release/neru --help   # the CLI only
 ```
+
+`ffmpeg` is optional (video backgrounds). Config, themes and media live in
+`~/.config/neru-screen-control/`.
 
 ## Device access (once)
 
@@ -77,11 +96,13 @@ Video backgrounds need `ffmpeg`.
 ## Project layout
 
 ```
-crates/neru-core   drivers (screen/), metrics/, render/ (themes), engine (render loop), config
+crates/neru-core   drivers (screen/), metrics/, render/ (themes), engine (render loop), config, theme store
 crates/neru-cli    the `neru` tool
+src-tauri/         the desktop app (Tauri 2): commands, tray, background mode
+ui/                the app's UI (React + TypeScript + Vite)
 assets/            bundled fonts (OFL) and themes
 docs/              protocol and theme format notes
-packaging/         udev rules, desktop entry, service unit, distro packaging
+packaging/         udev rules, desktop entry, distro packaging
 ```
 
 ## Contributing

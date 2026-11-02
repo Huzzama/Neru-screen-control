@@ -6,6 +6,7 @@
 //! * [`engine`]  — the loop that renders a theme and pushes it to a screen
 //! * [`config`]  — on-disk configuration (`~/.config/neru-screen-control/`)
 
+pub mod autostart;
 pub mod config;
 pub mod engine;
 pub mod error;
@@ -13,5 +14,6 @@ pub mod hidraw;
 pub mod metrics;
 pub mod render;
 pub mod screen;
+pub mod themes;
 
 pub use error::{Error, Result};

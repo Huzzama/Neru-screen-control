@@ -73,9 +73,23 @@ impl FontBook {
     }
 }
 
-/// Where the bundled `assets/` directory lives: `$NERU_ASSETS`, next to the
-/// executable (dev builds), or the system install location.
+static ASSETS_OVERRIDE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Tell the library where the bundled `assets/` directory is (the desktop app
+/// calls this with its resource directory). Only the first call counts.
+pub fn set_assets_dir(dir: PathBuf) {
+    let _ = ASSETS_OVERRIDE.set(dir);
+}
+
+/// Where the bundled `assets/` directory lives: [`set_assets_dir`],
+/// `$NERU_ASSETS`, next to the executable (dev builds), or the system install
+/// location.
 pub fn find_assets_dir() -> Option<PathBuf> {
+    if let Some(p) = ASSETS_OVERRIDE.get() {
+        if p.is_dir() {
+            return Some(p.clone());
+        }
+    }
     if let Some(p) = std::env::var_os("NERU_ASSETS") {
         let p = PathBuf::from(p);
         if p.is_dir() {

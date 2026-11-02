@@ -63,6 +63,8 @@ pub enum Command {
     Pause(bool),
     /// Produce preview frames for the UI.
     Preview(bool),
+    /// Pin a model id (`None` = first screen found) and reconnect.
+    SetModel(Option<String>),
     Reconnect,
     Stop,
 }
@@ -360,6 +362,10 @@ impl Worker {
                 self.set_status(|s| s.paused = p);
             }
             Command::Preview(p) => self.preview = p,
+            Command::SetModel(m) => {
+                self.cfg.model = m;
+                return self.handle(Command::Reconnect);
+            }
             Command::Reconnect => {
                 self.screen = None;
                 self.last_connect_attempt = None;

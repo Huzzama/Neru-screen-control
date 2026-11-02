@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/neru-core",
     "crates/neru-cli",
+    "src-tauri",
 ]
 
 [workspace.package]

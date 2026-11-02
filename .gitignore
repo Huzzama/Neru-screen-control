@@ -4,10 +4,11 @@ target/
 # ── Node / UI ─────────────────────────────────────────────────────────────────
 node_modules/
 ui/dist/
+ui/public/fonts/
 *.tsbuildinfo
 
 # ── Tauri ─────────────────────────────────────────────────────────────────────
-src-tauri/gen/schemas/
+src-tauri/gen/
 
 # ── Packaging output ──────────────────────────────────────────────────────────
 build/
