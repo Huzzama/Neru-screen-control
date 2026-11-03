@@ -13,26 +13,47 @@ use std::time::Instant;
 use super::hwmon;
 use super::CpuMetrics;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct StatSample {
     busy: u64,
     total: u64,
 }
 
-fn read_stat() -> Option<StatSample> {
-    let s = fs::read_to_string("/proc/stat").ok()?;
-    let line = s.lines().next()?; // "cpu  user nice system idle iowait irq softirq steal ..."
-    let nums: Vec<u64> = line
-        .split_whitespace()
-        .skip(1)
-        .filter_map(|t| t.parse().ok())
-        .collect();
+/// The aggregate line plus one sample per core from `/proc/stat`.
+#[derive(Debug, Clone, PartialEq)]
+struct StatSamples {
+    all: StatSample,
+    cores: Vec<StatSample>,
+}
+
+fn parse_stat_line(line: &str) -> Option<StatSample> {
+    // "cpu  user nice system idle iowait irq softirq steal ..."
+    let nums: Vec<u64> = line.split_whitespace().skip(1).filter_map(|t| t.parse().ok()).collect();
     if nums.len() < 4 {
         return None;
     }
     let idle = nums[3] + nums.get(4).copied().unwrap_or(0);
     let total: u64 = nums.iter().sum();
     Some(StatSample { busy: total - idle, total })
+}
+
+fn parse_stat(s: &str) -> Option<StatSamples> {
+    let mut lines = s.lines().filter(|l| l.starts_with("cpu"));
+    let all = parse_stat_line(lines.next()?)?;
+    let cores = lines.filter_map(parse_stat_line).collect();
+    Some(StatSamples { all, cores })
+}
+
+fn read_stat() -> Option<StatSamples> {
+    parse_stat(&fs::read_to_string("/proc/stat").ok()?)
+}
+
+fn usage_between(prev: StatSample, cur: StatSample) -> Option<f32> {
+    let dt = cur.total.saturating_sub(prev.total);
+    if dt == 0 {
+        return None;
+    }
+    Some((cur.busy.saturating_sub(prev.busy) as f32 / dt as f32 * 100.0).clamp(0.0, 100.0))
 }
 
 enum EnergySource {
@@ -57,7 +78,7 @@ pub struct CpuSource {
     temp_path: Option<PathBuf>,
     temp_source: String,
     energy: Option<EnergySource>,
-    last_stat: Option<StatSample>,
+    last_stat: Option<StatSamples>,
     last_energy: Option<(u64, Instant)>,
     cpufreq_paths: Vec<PathBuf>,
 }
@@ -109,21 +130,28 @@ impl CpuSource {
     pub fn read(&mut self) -> CpuMetrics {
         let now = Instant::now();
 
-        let usage_pct = match (self.last_stat, read_stat()) {
+        let (usage_pct, usage_max_pct, cores) = match (self.last_stat.take(), read_stat()) {
             (Some(prev), Some(cur)) => {
+                let all = usage_between(prev.all, cur.all);
+                let max = prev
+                    .cores
+                    .iter()
+                    .zip(cur.cores.iter())
+                    .filter_map(|(p, c)| usage_between(*p, *c))
+                    .fold(None, |m: Option<f32>, v| Some(m.map_or(v, |m| m.max(v))));
+                let n = cur.cores.len() as u32;
                 self.last_stat = Some(cur);
-                let dt = cur.total.saturating_sub(prev.total);
-                if dt == 0 {
-                    None
-                } else {
-                    Some((cur.busy.saturating_sub(prev.busy) as f32 / dt as f32 * 100.0).clamp(0.0, 100.0))
-                }
+                (all, max, n)
             }
             (None, Some(cur)) => {
+                let n = cur.cores.len() as u32;
                 self.last_stat = Some(cur);
-                None
+                (None, None, n)
             }
-            _ => None,
+            (prev, None) => {
+                self.last_stat = prev;
+                (None, None, 0)
+            }
         };
 
         let power_w = match (&self.energy, self.last_energy) {
@@ -152,8 +180,10 @@ impl CpuSource {
             name: self.name.clone(),
             temp_c,
             usage_pct,
+            usage_max_pct,
             freq_mhz: self.freq_mhz(),
             power_w,
+            cores,
         }
     }
 
@@ -254,4 +284,20 @@ fn find_energy() -> Option<EnergySource> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn per_core_usage() {
+        let a = parse_stat("cpu  100 0 100 800 0 0 0 0 0 0\ncpu0 50 0 50 400 0 0 0 0 0 0\ncpu1 50 0 50 400 0 0 0 0 0 0\nintr 1 2 3\n").unwrap();
+        let b = parse_stat("cpu  200 0 200 1600 0 0 0 0 0 0\ncpu0 150 0 150 500 0 0 0 0 0 0\ncpu1 50 0 50 1100 0 0 0 0 0 0\n").unwrap();
+        assert_eq!(a.cores.len(), 2);
+        assert!((usage_between(a.all, b.all).unwrap() - 20.0).abs() < 0.01);
+        let c0 = usage_between(a.cores[0], b.cores[0]).unwrap();
+        assert!((c0 - 66.666).abs() < 0.01, "{c0}");
+        assert_eq!(usage_between(a.cores[1], b.cores[1]), Some(0.0));
+    }
 }

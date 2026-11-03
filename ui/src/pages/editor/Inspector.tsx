@@ -2,7 +2,7 @@ import { Image as ImageIcon, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { ColorInput, Field, NumberInput, Select, Toggle } from "../../components/ui";
-import { api, type Align, type Background, type Element, type Fit, type MetricKey, type Stop, type Theme } from "../../lib/api";
+import { api, type Align, type Background, type Element, type Fit, type GraphStyle, type MetricKey, type Stop, type Theme } from "../../lib/api";
 import { FONT_WEIGHTS, SIZE_PRESETS, TYPE_LABEL } from "../../lib/theme-utils";
 import { MediaPicker } from "./MediaPicker";
 import type { Editor } from "./useEditor";
@@ -243,9 +243,20 @@ export function Inspector({ editor, fonts }: { editor: Editor; fonts: string[] }
       {el.type === "text" && (
         <>
           <Section title="Text">
-            <Field label="Content" hint="Placeholders: {cpu.temp:0}, {gpu.usage}, {mem.pct}, {time:%H:%M}, {date:%a %d}, {cpu.name}">
+            <Field label="Content" hint="Placeholders: {cpu.temp:0}, {gpu.usage}, {mem.pct}, {net.down:speed}, {fan.cpu:0}, {time:%H:%M}, {date:%a %d}, {uptime}, {cpu.name}. Formats: :1 decimals, :speed, :bits, :size, :pct">
               <textarea className="textarea" rows={2} value={el.text} onChange={(e) => up((x) => x.type === "text" && (x.text = e.target.value))} />
             </Field>
+            <details>
+              <summary className="hint" style={{ cursor: "pointer" }}>Insert a metric…</summary>
+              <div className="row-wrap" style={{ marginTop: 6, gap: 4 }}>
+                {keys.map((k) => (
+                  <button key={k.key} className="btn ghost sm" title={k.key} onClick={() => up((x) => x.type === "text" && (x.text = `${x.text}{${k.key}${k.unit === "B/s" ? ":speed" : k.unit === "°C" || k.unit === "%" || k.unit === "RPM" || k.unit === "W" || k.unit === "MHz" ? ":0" : ""}}`))}>
+                    {k.label}
+                    {k.unit ? <span className="dim"> {k.unit}</span> : null}
+                  </button>
+                ))}
+              </div>
+            </details>
             <Field label="Font">
               <Select value={el.font} options={fontOptions.some((f) => f.value === el.font) ? fontOptions : [{ value: el.font, label: `${el.font} (missing)` }, ...fontOptions]} onChange={(font) => up((x) => x.type === "text" && (x.font = font))} />
             </Field>
@@ -311,6 +322,42 @@ export function Inspector({ editor, fonts }: { editor: Editor; fonts: string[] }
               <Toggle on={el.round_caps} label="Round caps" onChange={(v) => up((x) => x.type === "gauge" && (x.round_caps = v))} /> Round caps
             </div>
             <span className="hint">Start −135 with sweep 270 is the classic three-quarter dial.</span>
+          </Section>
+          {ramp("ramp")}
+        </>
+      )}
+
+      {el.type === "graph" && (
+        <>
+          <Section title="Graph">
+            {metric("metric", "Metric")}
+            <div className="fields-2">
+              {num("w", "Width", { min: 4 })}
+              {num("h", "Height", { min: 4 })}
+              {num("seconds", "History (s)", { min: 5, max: 3600, step: 5 })}
+              <Field label="Style">
+                <Select<GraphStyle> value={el.style} options={[{ value: "area", label: "Area" }, { value: "line", label: "Line" }, { value: "bars", label: "Bars" }]} onChange={(style) => up((x) => x.type === "graph" && (x.style = style))} />
+              </Field>
+            </div>
+            <div className="row small" style={{ margin: "6px 0" }}>
+              <Toggle on={el.auto_scale} label="Auto scale" onChange={(v) => up((x) => x.type === "graph" && (x.auto_scale = v))} /> Auto scale
+              <span className="spacer" />
+              <Toggle on={el.smooth} label="Smooth" onChange={(v) => up((x) => x.type === "graph" && (x.smooth = v))} /> Smooth
+            </div>
+            {!el.auto_scale && (
+              <div className="fields-2">
+                {num("min", "Min")}
+                {num("max", "Max")}
+              </div>
+            )}
+            <div className="fields-2">
+              {color("color", "Line")}
+              {color("fill", "Fill", true)}
+              {color("track", "Background", true)}
+              {num("stroke_width", "Line width", { min: 0.5, step: 0.5 })}
+              {num("radius", "Corner radius", { min: 0 })}
+            </div>
+            <span className="hint">Newest value at the right edge. Auto scale fits whatever the window holds — right for speeds; fixed 0–100 is better for percentages.</span>
           </Section>
           {ramp("ramp")}
         </>

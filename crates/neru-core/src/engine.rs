@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tracing::{debug, error, info, warn};
 
-use crate::metrics::{Collector, Snapshot};
+use crate::metrics::{Collector, History, Snapshot};
+use crate::render::media::HwAccel;
 use crate::render::{FontBook, Renderer, Theme};
 use crate::screen::{self, Screen};
 use crate::Result;
@@ -30,6 +31,8 @@ pub struct EngineConfig {
     pub preview_fps: u32,
     pub preview_quality: u8,
     pub media_dir: Option<std::path::PathBuf>,
+    /// Hardware-accelerated video decoding for media layers.
+    pub hwaccel: HwAccel,
 }
 
 impl Default for EngineConfig {
@@ -45,6 +48,7 @@ impl Default for EngineConfig {
             preview_fps: 8,
             preview_quality: 70,
             media_dir: None,
+            hwaccel: HwAccel::Off,
         }
     }
 }
@@ -59,6 +63,8 @@ pub enum Command {
     SetFps(u32),
     SetJpegQuality(u8),
     SetFahrenheit(bool),
+    /// Video decoding acceleration (restarts running videos).
+    SetHwAccel(HwAccel),
     /// Stop pushing frames; the screen falls back to its own picture.
     Pause(bool),
     /// Produce preview frames for the UI.
@@ -89,6 +95,9 @@ pub struct EngineStatus {
     pub screen: Option<ScreenSummary>,
     /// Screens seen on the bus (including ones without permission).
     pub detected: Vec<String>,
+    /// Cooler displays Neru recognises but has no driver for.
+    #[serde(default)]
+    pub recognised_only: Vec<String>,
     pub needs_udev: bool,
     pub last_error: Option<String>,
     pub paused: bool,
@@ -116,6 +125,7 @@ pub struct Engine {
     tx: Sender<Command>,
     status: Arc<Mutex<EngineStatus>>,
     metrics: Arc<RwLock<Snapshot>>,
+    history: Arc<RwLock<History>>,
     handle: Option<thread::JoinHandle<()>>,
     _collector: Collector,
 }
@@ -124,6 +134,7 @@ impl Engine {
     pub fn start(cfg: EngineConfig, theme: Theme, fonts: Arc<FontBook>, sink: Option<PreviewSink>) -> Result<Self> {
         let collector = Collector::start(cfg.metrics_interval);
         let metrics = collector.shared();
+        let history = collector.history();
         let status = Arc::new(Mutex::new(EngineStatus {
             theme_name: theme.name.clone(),
             theme_width: theme.width,
@@ -131,12 +142,12 @@ impl Engine {
             ..Default::default()
         }));
         let (tx, rx) = channel();
-        let worker = Worker::new(cfg, theme, fonts, metrics.clone(), status.clone(), rx, sink)?;
+        let worker = Worker::new(cfg, theme, fonts, metrics.clone(), history.clone(), status.clone(), rx, sink)?;
         let handle = thread::Builder::new()
             .name("neru-engine".into())
             .spawn(move || worker.run())
             .expect("spawn engine thread");
-        Ok(Self { tx, status, metrics, handle: Some(handle), _collector: collector })
+        Ok(Self { tx, status, metrics, history, handle: Some(handle), _collector: collector })
     }
 
     pub fn send(&self, cmd: Command) {
@@ -154,6 +165,11 @@ impl Engine {
     /// The live metrics shared with other engines (RGB effects read it too).
     pub fn metrics_shared(&self) -> Arc<RwLock<Snapshot>> {
         self.metrics.clone()
+    }
+
+    /// Recent values of every metric (graphs, dashboards).
+    pub fn history(&self) -> Arc<RwLock<History>> {
+        self.history.clone()
     }
 
     pub fn stop(&mut self) {
@@ -197,12 +213,15 @@ impl Worker {
         theme: Theme,
         fonts: Arc<FontBook>,
         metrics: Arc<RwLock<Snapshot>>,
+        history: Arc<RwLock<History>>,
         status: Arc<Mutex<EngineStatus>>,
         rx: Receiver<Command>,
         sink: Option<PreviewSink>,
     ) -> Result<Self> {
         let mut renderer = Renderer::new(theme.clone(), fonts.db.clone(), cfg.media_dir.clone())?;
         renderer.fahrenheit = cfg.fahrenheit;
+        renderer.set_history(history);
+        renderer.set_hwaccel(cfg.hwaccel);
         Ok(Self {
             cfg,
             theme,
@@ -258,9 +277,21 @@ impl Worker {
         self.last_connect_attempt = Some(Instant::now());
         let detected = screen::detect();
         let needs_udev = detected.iter().any(|d| !d.accessible);
-        let names: Vec<String> = detected.iter().map(|d| d.to_string()).collect();
+        // Variants of one physical screen share a location: list it once.
+        let mut names: Vec<String> = Vec::new();
+        let mut seen: Vec<(u16, u16, String)> = Vec::new();
+        for d in &detected {
+            let (vid, pid) = d.model.transport.vid_pid();
+            let k = (vid, pid, d.location.clone());
+            if !seen.contains(&k) {
+                seen.push(k);
+                names.push(d.to_string());
+            }
+        }
+        let recognised_only = screen::detect_recognised_only();
         self.set_status(|s| {
             s.detected = names;
+            s.recognised_only = recognised_only;
             s.needs_udev = needs_udev;
         });
         let Some(pick) = detected
@@ -361,6 +392,10 @@ impl Worker {
             Command::SetFahrenheit(f) => {
                 self.cfg.fahrenheit = f;
                 self.renderer.fahrenheit = f;
+            }
+            Command::SetHwAccel(h) => {
+                self.cfg.hwaccel = h;
+                self.renderer.set_hwaccel(h);
             }
             Command::Pause(p) => {
                 self.paused = p;

@@ -1,16 +1,18 @@
-import { ArrowLeft, Check, Copy, Grid3X3, MonitorUp, Plus, Redo2, Save, Trash2, Undo2 } from "lucide-react";
+import { Activity, ArrowLeft, BarChart3, Check, Circle, Copy, Gauge as GaugeIcon, Grid3X3, Image as ImageIcon, Minus, MonitorUp, Plus, Redo2, Save, Square, Trash2, Type, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Modal, useToast } from "../components/ui";
 import { api, errText, type ElementType, type EngineStatus, type Theme, type ThemeInfo } from "../lib/api";
 import { useConfig, usePreview } from "../lib/hooks";
-import { blankTheme, makeElement, newId, normalizeTheme, TYPE_LABEL } from "../lib/theme-utils";
+import { blankTheme, makeElement, newId, normalizeTheme, PRESETS, TYPE_LABEL } from "../lib/theme-utils";
 import { Canvas } from "./editor/Canvas";
 import { Inspector } from "./editor/Inspector";
 import { Layers } from "./editor/Layers";
 import { useEditor } from "./editor/useEditor";
 
-const ADD_TYPES: ElementType[] = ["text", "bar", "gauge", "rect", "ellipse", "line", "image"];
+const ADD_ICON: Record<ElementType, typeof Type> = { text: Type, bar: BarChart3, gauge: GaugeIcon, graph: Activity, rect: Square, ellipse: Circle, line: Minus, image: ImageIcon };
+const METRIC_TYPES: ElementType[] = ["bar", "gauge", "graph"];
+const DECOR_TYPES: ElementType[] = ["text", "image", "rect", "ellipse", "line"];
 
 export function ScreenPage({ status }: { status: EngineStatus }) {
   const [editing, setEditing] = useState<{ id: string | null; theme: Theme } | null>(null);
@@ -290,6 +292,17 @@ function ThemeEditor({ initialId, initial, status, onExit }: { initialId: string
     setAddOpen(false);
   };
 
+  const addPreset = (id: string) => {
+    const preset = PRESETS.find((p) => p.id === id);
+    if (!preset) return;
+    const els = preset.build(theme.width, theme.height);
+    patch((t) => {
+      t.elements.push(...els);
+    });
+    select(els[els.length - 1]?.id ?? null);
+    setAddOpen(false);
+  };
+
   const sizeMismatch = status.screen && (status.screen.width !== theme.width || status.screen.height !== theme.height);
 
   return (
@@ -318,12 +331,38 @@ function ThemeEditor({ initialId, initial, status, onExit }: { initialId: string
               <Plus size={15} /> Add
             </button>
             {addOpen && (
-              <div className="menu" role="menu" style={{ top: "calc(100% + 6px)", left: 0 }} onMouseLeave={() => setAddOpen(false)}>
-                {ADD_TYPES.map((t) => (
-                  <button key={t} role="menuitem" onClick={() => add(t)}>
-                    {TYPE_LABEL[t]}
+              <div className="menu add-menu" role="menu" style={{ top: "calc(100% + 6px)", left: 0 }} onMouseLeave={() => setAddOpen(false)}>
+                <div className="menu-col">
+                  <div className="menu-head">Widgets</div>
+                  {PRESETS.map((p) => (
+                    <button key={p.id} role="menuitem" onClick={() => addPreset(p.id)} title={p.hint}>
+                      <span>{p.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="menu-col">
+                  <div className="menu-head">Metrics</div>
+                  <button role="menuitem" onClick={() => add("text")}>
+                    <Type size={14} /> Value (text)
                   </button>
-                ))}
+                  {METRIC_TYPES.map((t) => {
+                    const Icon = ADD_ICON[t];
+                    return (
+                      <button key={t} role="menuitem" onClick={() => add(t)}>
+                        <Icon size={14} /> {t === "graph" ? "Graph (history)" : TYPE_LABEL[t]}
+                      </button>
+                    );
+                  })}
+                  <div className="menu-head">Decoration</div>
+                  {DECOR_TYPES.map((t) => {
+                    const Icon = ADD_ICON[t];
+                    return (
+                      <button key={t} role="menuitem" onClick={() => add(t)}>
+                        <Icon size={14} /> {t === "image" ? "Image / GIF / video" : TYPE_LABEL[t]}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

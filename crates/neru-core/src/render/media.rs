@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use image::{AnimationDecoder, RgbaImage};
 use resvg::tiny_skia::Pixmap;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
 use super::theme::Fit;
@@ -73,14 +74,14 @@ pub enum Source {
 
 impl Source {
     /// Decode `path` and scale it to `w`×`h`.
-    pub fn load(path: &Path, w: u32, h: u32, fit: Fit) -> Result<Self> {
+    pub fn load(path: &Path, w: u32, h: u32, fit: Fit, hwaccel: HwAccel) -> Result<Self> {
         let ext = path
             .extension()
             .map(|e| e.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
         match ext.as_str() {
             "gif" => Self::load_gif(path, w, h, fit),
-            "mp4" | "mkv" | "webm" | "mov" | "avi" | "m4v" => Ok(Source::Video(VideoStream::start(path, w, h, fit)?)),
+            "mp4" | "mkv" | "webm" | "mov" | "avi" | "m4v" => Ok(Source::Video(VideoStream::start(path, w, h, fit, hwaccel)?)),
             _ => {
                 let img = image::open(path)
                     .map_err(|e| Error::Image(format!("{}: {e}", path.display())))?
@@ -137,6 +138,73 @@ impl Source {
     }
 }
 
+/// Hardware-accelerated decoding for video layers (`ffmpeg -hwaccel`).
+/// Frames still come back as RGBA on the CPU; what the GPU saves is the
+/// H.264/HEVC/AV1 decode itself, which matters for big sources.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HwAccel {
+    /// Software decoding.
+    #[default]
+    Off,
+    /// Let ffmpeg pick any working accelerator, falling back to software.
+    Auto,
+    /// NVIDIA (NVDEC through CUDA).
+    Nvidia,
+    /// AMD and Intel through VA-API (`/dev/dri/renderD*`).
+    Vaapi,
+}
+
+impl HwAccel {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "off" | "software" | "none" => Some(Self::Off),
+            "auto" => Some(Self::Auto),
+            "nvidia" | "cuda" | "nvdec" => Some(Self::Nvidia),
+            "vaapi" | "amd" | "intel" => Some(Self::Vaapi),
+            _ => None,
+        }
+    }
+
+    /// Arguments that go before `-i`.
+    pub fn ffmpeg_args(self) -> Vec<String> {
+        match self {
+            HwAccel::Off => Vec::new(),
+            HwAccel::Auto => vec!["-hwaccel".into(), "auto".into()],
+            HwAccel::Nvidia => vec!["-hwaccel".into(), "cuda".into()],
+            HwAccel::Vaapi => {
+                let mut v = vec!["-hwaccel".into(), "vaapi".into()];
+                if let Some(node) = vaapi_render_node() {
+                    v.push("-hwaccel_device".into());
+                    v.push(node);
+                }
+                v
+            }
+        }
+    }
+}
+
+/// The first DRM render node that is not an NVIDIA card (VA-API lives on
+/// AMD / Intel), else the first one at all.
+fn vaapi_render_node() -> Option<String> {
+    let mut nodes: Vec<PathBuf> = std::fs::read_dir("/dev/dri")
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.file_name().map_or(false, |n| n.to_string_lossy().starts_with("renderD")))
+        .collect();
+    nodes.sort();
+    let vendor_of = |p: &Path| -> Option<String> {
+        let name = p.file_name()?.to_string_lossy().to_string();
+        std::fs::read_to_string(format!("/sys/class/drm/{name}/device/vendor")).ok().map(|s| s.trim().to_string())
+    };
+    nodes
+        .iter()
+        .find(|p| vendor_of(p).map_or(true, |v| v != "0x10de"))
+        .or(nodes.first())
+        .map(|p| p.display().to_string())
+}
+
 /// Frames from `ffmpeg` as raw RGBA at a fixed rate, looping forever.
 pub struct VideoStream {
     child: Child,
@@ -151,18 +219,21 @@ pub struct VideoStream {
 impl VideoStream {
     pub const FPS: u32 = 15;
 
-    pub fn start(path: &Path, w: u32, h: u32, fit: Fit) -> Result<Self> {
+    pub fn start(path: &Path, w: u32, h: u32, fit: Fit, hwaccel: HwAccel) -> Result<Self> {
         let vf = match fit {
             Fit::Cover => format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"),
             Fit::Contain => format!("scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black@0"),
             Fit::Stretch => format!("scale={w}:{h}"),
         };
+        if hwaccel != HwAccel::Off {
+            debug!(?hwaccel, "video decoding with hardware acceleration");
+        }
         let mut child = Command::new("ffmpeg")
             .args([
                 "-hide_banner", "-loglevel", "error", "-nostdin",
-                "-stream_loop", "-1",
-                "-i",
             ])
+            .args(hwaccel.ffmpeg_args())
+            .args(["-stream_loop", "-1", "-i"])
             .arg(path)
             .args([
                 "-an",
@@ -259,11 +330,12 @@ struct Key {
 pub struct MediaCache {
     entries: HashMap<Key, Result<Source>>,
     media_dir: Option<PathBuf>,
+    pub hwaccel: HwAccel,
 }
 
 impl MediaCache {
     pub fn new(media_dir: Option<PathBuf>) -> Self {
-        Self { entries: HashMap::new(), media_dir }
+        Self { entries: HashMap::new(), media_dir, hwaccel: HwAccel::Off }
     }
 
     /// Absolute paths are used as-is; bare names resolve inside the media dir.
@@ -281,7 +353,7 @@ impl MediaCache {
     pub fn get(&mut self, path: &str, w: u32, h: u32, fit: Fit) -> Option<&mut Source> {
         let key = Key { path: self.resolve(path), w, h, fit };
         if !self.entries.contains_key(&key) {
-            let loaded = Source::load(&key.path, w, h, fit);
+            let loaded = Source::load(&key.path, w, h, fit, self.hwaccel);
             if let Err(e) = &loaded {
                 warn!(path, error = %e, "could not load media");
             }

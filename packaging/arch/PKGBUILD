@@ -1,21 +1,21 @@
 # Maintainer: Huzzama <chewbaccanator0405@gmail.com>
 pkgname=neru-screen-control
-pkgver=2.0.0alpha1
+pkgver=2.0.0
 pkgrel=1
 pkgdesc="Cooler LCD screens (Thermaltake, Thermalright), PC RGB lighting via OpenRGB and fan curves — one app"
 arch=('x86_64')
 url="https://github.com/Huzzama/Neru-screen-control"
-license=('MIT')
+license=('GPL-3.0-or-later')
 depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'librsvg' 'libusb' 'polkit')
 optdepends=(
   'openrgb: RGB lighting control'
   'ffmpeg: video backgrounds on the screen'
 )
 makedepends=('cargo' 'rust' 'nodejs' 'npm' 'pkgconf')
-source=("$pkgname-$pkgver.tar.gz::$url/archive/v2.0.0-alpha.1.tar.gz")
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
-_srcdir="Neru-screen-control-2.0.0-alpha.1"
+_srcdir="Neru-screen-control-$pkgver"
 
 prepare() {
   cd "$srcdir/$_srcdir"
@@ -55,6 +55,7 @@ package() {
   done
 
   install -Dm644 packaging/shared/70-neru-screen-control.rules "$pkgdir/usr/lib/udev/rules.d/70-neru-screen-control.rules"
+  install -Dm644 packaging/shared/neru-screen-control-modules.conf "$pkgdir/usr/lib/modules-load.d/neru-screen-control.conf"
   # Fan helper unit — stays disabled until enabled from the app (Fans → Install helper)
   install -Dm644 packaging/shared/neru-fand.service "$pkgdir/usr/lib/systemd/system/neru-fand.service"
 

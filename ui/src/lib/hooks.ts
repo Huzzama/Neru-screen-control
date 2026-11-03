@@ -6,6 +6,7 @@ const EMPTY_STATUS: EngineStatus = {
   connected: false,
   screen: null,
   detected: [],
+  recognised_only: [],
   needs_udev: false,
   last_error: null,
   paused: false,

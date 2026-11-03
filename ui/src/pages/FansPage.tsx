@@ -104,7 +104,9 @@ function ChannelCard({ ch, cfg, status, onChange }: { ch: FanChannel; cfg: FanCh
           {!ch.writable && !status.helper && <span className="badge red">read-only</span>}
         </div>
         <div className="row mono small muted">
-          <span>{ch.rpm != null ? `${ch.rpm} RPM` : "no tach"}</span>
+          <span title={ch.rpm === 0 || ch.rpm == null ? "The header reports no speed: nothing is plugged in, or a hub / splitter that does not pass the tach signal through. PWM control still works." : undefined}>
+            {ch.rpm != null && ch.rpm > 0 ? `${ch.rpm} RPM` : ch.rpm === 0 ? "no tach signal" : "no tach"}
+          </span>
           <span>·</span>
           <span>{duty != null ? `${duty.toFixed(0)}% duty` : "--"}</span>
           {state?.target_pct != null && (

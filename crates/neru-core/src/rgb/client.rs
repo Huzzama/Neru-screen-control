@@ -141,6 +141,13 @@ impl OpenRgbClient {
         self.send(dev, id::UPDATE_ZONE_LEDS, &p::encode_update_zone_leds(zone, colors))
     }
 
+    pub fn resize_zone(&mut self, dev: u32, zone: u32, leds: u32) -> Result<()> {
+        let mut p = Vec::with_capacity(8);
+        p.extend_from_slice(&(zone as i32).to_le_bytes());
+        p.extend_from_slice(&(leds as i32).to_le_bytes());
+        self.send(dev, id::RESIZE_ZONE, &p)
+    }
+
     pub fn set_custom_mode(&mut self, dev: u32) -> Result<()> {
         self.send(dev, id::SET_CUSTOM_MODE, &[])
     }

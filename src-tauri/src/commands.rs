@@ -224,10 +224,7 @@ pub fn udev_status(state: State<AppState>) -> UdevStatus {
 
 #[tauri::command]
 pub fn install_udev() -> Res<()> {
-    let rules = screen::udev_rules();
-    let script = format!(
-        "set -e; cat > {UDEV_FILE} <<'EOF'\n{rules}EOF\nudevadm control --reload-rules && udevadm trigger"
-    );
+    let script = screen::udev_install_script(UDEV_FILE);
     let status = std::process::Command::new("pkexec")
         .args(["sh", "-c", &script])
         .status()
@@ -265,6 +262,9 @@ pub struct AppInfo {
     pub exe: String,
     pub background_mode: bool,
     pub ffmpeg: bool,
+    /// What `ffmpeg -hwaccels` reports (empty when ffmpeg is missing).
+    pub hwaccels: Vec<String>,
+    pub gpu_window_env: bool,
 }
 
 #[tauri::command]
@@ -278,7 +278,21 @@ pub fn app_info(state: State<AppState>) -> AppInfo {
         exe: std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default(),
         background_mode: state.background_mode,
         ffmpeg: which("ffmpeg"),
+        hwaccels: ffmpeg_hwaccels(),
+        gpu_window_env: std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").map_or(true, |v| v != "1"),
     }
+}
+
+fn ffmpeg_hwaccels() -> Vec<String> {
+    let Ok(out) = std::process::Command::new("ffmpeg").args(["-hide_banner", "-hwaccels"]).output() else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.ends_with(':'))
+        .map(String::from)
+        .collect()
 }
 
 fn which(bin: &str) -> bool {
@@ -289,17 +303,24 @@ fn which(bin: &str) -> bool {
 
 #[derive(Serialize)]
 pub struct MetricKey {
-    pub key: &'static str,
-    pub label: &'static str,
-    pub unit: &'static str,
+    pub key: String,
+    pub label: String,
+    pub unit: String,
 }
 
+/// Every metric a theme can bind to, including the fans found on this machine.
 #[tauri::command]
-pub fn metric_keys() -> Vec<MetricKey> {
-    Snapshot::KEYS
-        .iter()
-        .map(|(key, label, unit)| MetricKey { key, label, unit })
-        .collect()
+pub fn metric_keys(state: State<AppState>) -> Vec<MetricKey> {
+    let snapshot = state.engine.lock().map(|e| e.metrics()).unwrap_or_default();
+    snapshot.keys().into_iter().map(|(key, label, unit)| MetricKey { key, label, unit }).collect()
+}
+
+/// Recent values of a metric: `(age in seconds, value)`, oldest first.
+#[tauri::command]
+pub fn metric_history(state: State<AppState>, key: String, seconds: f32) -> Vec<(f32, f32)> {
+    let Ok(engine) = state.engine.lock() else { return Vec::new() };
+    let now = engine.metrics().uptime_s;
+    engine.history().read().map(|h| h.window(&key, seconds, now)).unwrap_or_default()
 }
 
 /// One frame of a theme as a small JPEG data URL (for the gallery).
@@ -365,9 +386,22 @@ pub fn rgb_clear_all(state: State<AppState>) -> Res<()> {
     state.apply_config(cfg)
 }
 
+/// LED count of a resizable zone (ARGB header).
+#[tauri::command]
+pub fn rgb_set_zone_size(state: State<AppState>, controller: String, zone: u32, leds: u32) -> Res<()> {
+    let mut cfg = state.config.lock().map_err(err)?.clone();
+    cfg.rgb.zone_sizes.insert(format!("{controller}#{zone}"), leds.min(1000));
+    state.apply_config(cfg)
+}
+
 #[tauri::command]
 pub fn rgb_refresh(state: State<AppState>) {
     state.send_rgb(RgbCommand::Refresh);
+}
+
+#[tauri::command]
+pub fn rgb_rescan_native(state: State<AppState>) {
+    state.send_rgb(RgbCommand::RescanNative);
 }
 
 #[tauri::command]

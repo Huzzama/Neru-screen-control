@@ -24,6 +24,7 @@ pub mod id {
     pub const SAVE_PROFILE: u32 = 151;
     pub const LOAD_PROFILE: u32 = 152;
     pub const DELETE_PROFILE: u32 = 153;
+    pub const RESIZE_ZONE: u32 = 1000;
     pub const UPDATE_LEDS: u32 = 1050;
     pub const UPDATE_ZONE_LEDS: u32 = 1051;
     pub const UPDATE_SINGLE_LED: u32 = 1052;
@@ -181,12 +182,40 @@ pub struct Controller {
     pub zones: Vec<Zone>,
     pub leds: Vec<String>,
     pub colors: Vec<Color>,
+    /// Driven by a Neru driver rather than through OpenRGB.
+    #[serde(default)]
+    pub native: bool,
+    /// Ordinal among devices with the same name and serial (0 = the first),
+    /// assigned by the engine so identical RAM sticks stay distinguishable.
+    #[serde(default)]
+    pub dup: u32,
 }
 
 impl Controller {
-    /// Stable key across reconnects (indices change when devices come and go).
+    /// Stable key across reconnects and reboots: name + serial, plus an
+    /// ordinal for identical devices. Indices change when devices come and
+    /// go, and `/dev/hidrawN` / `/dev/i2c-N` numbers change between boots,
+    /// so neither takes part.
     pub fn key(&self) -> String {
-        format!("{}|{}|{}", self.name, self.location, self.serial)
+        if self.dup > 0 {
+            format!("{}|{}~{}", self.name, self.serial, self.dup + 1)
+        } else {
+            format!("{}|{}", self.name, self.serial)
+        }
+    }
+
+    /// Give every controller in `list` a [`Controller::dup`] ordinal so keys
+    /// are unique; identical devices are numbered in location order.
+    pub fn assign_ordinals(list: &mut [Controller]) {
+        let mut order: Vec<usize> = (0..list.len()).collect();
+        order.sort_by(|&a, &b| list[a].location.cmp(&list[b].location));
+        let mut seen: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        for i in order {
+            let base = format!("{}|{}", list[i].name, list[i].serial);
+            let n = seen.entry(base).or_insert(0);
+            list[i].dup = *n;
+            *n += 1;
+        }
     }
 
     pub fn kind_name(&self) -> &'static str {
@@ -222,6 +251,21 @@ impl Controller {
             .or_else(|| self.modes.iter().position(|m| m.has(mode_flags::HAS_PER_LED_COLOR)))
     }
 }
+
+/// Rewrite a key saved by Neru ≤ 2.0.0-alpha.1 (`name|location|serial`) to
+/// the current form (`name|serial`). Keys already in the new form pass through.
+pub fn migrate_key(key: &str) -> String {
+    let parts: Vec<&str> = key.split('|').collect();
+    if parts.len() >= 3 {
+        // Drop the location segment (the second one).
+        let mut v = parts.clone();
+        v.remove(1);
+        v.join("|")
+    } else {
+        key.to_string()
+    }
+}
+
 
 // ── packets ─────────────────────────────────────────────────────────────────
 
@@ -469,6 +513,20 @@ pub fn parse_profile_list(payload: &[u8]) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keys_ignore_locations_and_number_duplicates() {
+        let mk = |name: &str, loc: &str, serial: &str| Controller { name: name.into(), location: loc.into(), serial: serial.into(), ..Default::default() };
+        let mut list = vec![mk("ENE DRAM", "I2C: /dev/i2c-1, address 0x72", ""), mk("ENE DRAM", "I2C: /dev/i2c-1, address 0x70", ""), mk("ASUS Aura", "HID: /dev/hidraw8", "X1")];
+        Controller::assign_ordinals(&mut list);
+        assert_eq!(list[1].key(), "ENE DRAM|");
+        assert_eq!(list[0].key(), "ENE DRAM|~2");
+        assert_eq!(list[2].key(), "ASUS Aura|X1");
+        assert_eq!(migrate_key("ASUS Aura|HID: /dev/hidraw8|X1"), "ASUS Aura|X1");
+        assert_eq!(migrate_key("ENE DRAM|I2C: /dev/i2c-1, address 0x70|"), "ENE DRAM|");
+        assert_eq!(migrate_key("ASUS Aura|X1"), "ASUS Aura|X1");
+        assert_eq!(migrate_key("ENE DRAM|~2"), "ENE DRAM|~2");
+    }
 
     fn s(out: &mut Vec<u8>, v: &str) {
         put_string(out, v);

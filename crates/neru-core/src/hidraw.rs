@@ -21,6 +21,33 @@ pub struct HidNode {
     pub name: String,
 }
 
+/// Enumerate hidraw nodes for one vendor and any of `pids`.
+pub fn find_any(vid: u16, pids: &[u16]) -> Vec<HidNode> {
+    let mut out = Vec::new();
+    for &pid in pids {
+        out.extend(find(vid, pid));
+    }
+    out
+}
+
+/// USB serial number of the device behind a hidraw node (from sysfs).
+pub fn serial_of(node: &Path) -> String {
+    let Some(name) = node.file_name() else { return String::new() };
+    let dev = Path::new("/sys/class/hidraw").join(name).join("device");
+    // hidraw → hid device → usb interface → usb device (which has `serial`).
+    let Ok(real) = fs::canonicalize(&dev) else { return String::new() };
+    let mut p = real;
+    for _ in 0..4 {
+        if let Ok(s) = fs::read_to_string(p.join("serial")) {
+            return s.trim().to_string();
+        }
+        if !p.pop() {
+            break;
+        }
+    }
+    String::new()
+}
+
 /// Enumerate hidraw nodes for one VID:PID (sorted by node name).
 pub fn find(vid: u16, pid: u16) -> Vec<HidNode> {
     let mut out = Vec::new();
@@ -53,6 +80,16 @@ pub fn find(vid: u16, pid: u16) -> Vec<HidNode> {
         });
     }
     out
+}
+
+/// Whether the node's HID report descriptor declares `usage_page`
+/// (a 16-bit "Usage Page" item: `06 lo hi`).
+pub fn has_usage_page(node: &Path, usage_page: u16) -> bool {
+    let Some(name) = node.file_name() else { return false };
+    let desc = Path::new("/sys/class/hidraw").join(name).join("device/report_descriptor");
+    let Ok(bytes) = fs::read(desc) else { return false };
+    let [lo, hi] = usage_page.to_le_bytes();
+    bytes.windows(3).any(|w| w == [0x06, lo, hi])
 }
 
 /// Parse `HID_ID=0003:0000264A:00002348` → (0x264A, 0x2348).
@@ -104,6 +141,16 @@ impl HidRaw {
         Ok(())
     }
 
+    /// Write bytes exactly as given (for devices with report IDs, the first
+    /// byte is the report ID).
+    pub fn write_raw(&mut self, data: &[u8]) -> Result<()> {
+        let n = self.file.write(data)?;
+        if n != data.len() {
+            return Err(Error::Protocol(format!("short hidraw write: {n} of {} bytes", data.len())));
+        }
+        Ok(())
+    }
+
     /// Wait up to `timeout_ms` for an input report. Returns `None` on timeout.
     pub fn read_report(&mut self, buf: &mut [u8], timeout_ms: i32) -> Result<Option<usize>> {
         let mut pfd = libc::pollfd {
@@ -132,6 +179,58 @@ impl HidRaw {
         let mut scratch = [0u8; 4096];
         while self.read_report(&mut scratch, 0)?.is_some() {}
         Ok(())
+    }
+
+    /// Write a report (`0x00` + data, for devices without report IDs) and
+    /// wait up to `timeout_ms` for the reply; the reply bytes are returned
+    /// (empty on timeout).
+    pub fn exchange(&mut self, report: &[u8], timeout_ms: i32) -> Result<Vec<u8>> {
+        self.write_report(report)?;
+        let mut buf = vec![0u8; 256];
+        match self.read_report(&mut buf, timeout_ms)? {
+            Some(n) => {
+                buf.truncate(n);
+                Ok(buf)
+            }
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Same as [`HidRaw::exchange`] for devices whose first data byte is the
+    /// command (no report-ID byte is prepended).
+    pub fn exchange_raw(&mut self, data: &[u8], timeout_ms: i32) -> Result<Vec<u8>> {
+        self.write_raw(data)?;
+        let mut buf = vec![0u8; 256];
+        match self.read_report(&mut buf, timeout_ms)? {
+            Some(n) => {
+                buf.truncate(n);
+                Ok(buf)
+            }
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Send a feature report (`HIDIOCSFEATURE`); `data[0]` is the report ID.
+    pub fn send_feature_report(&mut self, data: &[u8]) -> Result<()> {
+        // _IOC(_IOC_WRITE | _IOC_READ, 'H', 0x06, len)
+        let req: libc::c_ulong = (3u64 << 30) | ((data.len() as u64) << 16) | ((b'H' as u64) << 8) | 0x06;
+        // SAFETY: `data` is a valid buffer of the length encoded in the request.
+        let r = unsafe { libc::ioctl(self.file.as_raw_fd(), req as _, data.as_ptr()) };
+        if r < 0 {
+            return Err(Error::Io(std::io::Error::last_os_error()));
+        }
+        Ok(())
+    }
+
+    /// Read a feature report (`HIDIOCGFEATURE`); `buf[0]` must hold the report ID.
+    pub fn get_feature_report(&mut self, buf: &mut [u8]) -> Result<usize> {
+        let req: libc::c_ulong = (3u64 << 30) | ((buf.len() as u64) << 16) | ((b'H' as u64) << 8) | 0x07;
+        // SAFETY: `buf` is a valid, writable buffer of the encoded length.
+        let r = unsafe { libc::ioctl(self.file.as_raw_fd(), req as _, buf.as_mut_ptr()) };
+        if r < 0 {
+            return Err(Error::Io(std::io::Error::last_os_error()));
+        }
+        Ok(r as usize)
     }
 }
 

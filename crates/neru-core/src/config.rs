@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::render::media::HwAccel;
 use crate::rgb::RgbConfig;
 use crate::screen::thermalright::Calibration;
 use crate::{Error, Result};
@@ -98,6 +99,11 @@ pub struct AppBehavior {
     pub launch_hidden: bool,
     pub tray_icon: bool,
     pub minimize_on_close: bool,
+    /// Hardware-accelerated decoding of video backgrounds / layers (ffmpeg).
+    pub video_hwaccel: HwAccel,
+    /// Let the app window render through the GPU (WebKit DMA-BUF). Off by
+    /// default: NVIDIA + Wayland can show a blank window with it on.
+    pub gpu_window: bool,
 }
 
 impl Default for AppBehavior {
@@ -107,6 +113,8 @@ impl Default for AppBehavior {
             launch_hidden: false,
             tray_icon: true,
             minimize_on_close: true,
+            video_hwaccel: HwAccel::Off,
+            gpu_window: false,
         }
     }
 }
@@ -123,7 +131,14 @@ pub struct AppConfig {
 impl AppConfig {
     pub fn load(path: &Path) -> Result<Self> {
         match fs::read_to_string(path) {
-            Ok(s) => serde_json::from_str(&s).map_err(|e| Error::Config(format!("{}: {e}", path.display()))),
+            Ok(s) => {
+                let mut cfg: Self = serde_json::from_str(&s).map_err(|e| Error::Config(format!("{}: {e}", path.display())))?;
+                if cfg.rgb.migrate() {
+                    tracing::info!("rgb config keys migrated to the location-independent format");
+                    let _ = cfg.save(path);
+                }
+                Ok(cfg)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(e.into()),
         }
@@ -157,6 +172,12 @@ mod tests {
         let c2 = AppConfig::load(&p).unwrap();
         assert_eq!(c2.screen.fps, 5);
         assert_eq!(c2.screen.brightness, 100);
+        // Old RGB keys with a device path inside are rewritten on load.
+        fs::write(&p, r##"{"rgb":{"assignments":[{"controller":"ASUS Aura|HID: /dev/hidraw8|","zone":null,"effect":{"kind":"static","color":"#ff0000"}}],"zone_sizes":{"ASUS Aura|HID: /dev/hidraw8|#1":24}}}"##).unwrap();
+        let c3 = AppConfig::load(&p).unwrap();
+        assert_eq!(c3.rgb.assignments[0].controller, "ASUS Aura|");
+        assert_eq!(c3.rgb.zone_sizes.get("ASUS Aura|#1"), Some(&24));
+        assert!(fs::read_to_string(&p).unwrap().contains("\"ASUS Aura|\""));
         fs::remove_dir_all(&dir).unwrap();
     }
 }

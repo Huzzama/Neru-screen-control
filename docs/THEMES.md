@@ -56,13 +56,28 @@ Placeholders inside `text`:
 |---|---|
 | `{cpu.temp}` | value, no decimals |
 | `{cpu.temp:1}` | one decimal |
+| `{net.down:speed}` | bytes/s with an automatic unit: `12.3 MB/s` (`speed.0` = no decimals) |
+| `{net.down:bits}` | bytes/s as bits: `98.4 Mbps` |
+| `{mem.used:size}` | MB with an automatic unit: `12.3 GB` |
+| `{disk.used:bytes}` | bytes with an automatic unit (`KB`, `MB`, `GB`, `TB`) |
+| `{cpu.usage:pct}` | `62%` |
+| `{sys.uptime:uptime}` or `{uptime}` | `3d 04:12` |
 | `{time:%H:%M}` | current time, strftime format |
 | `{date:%A %d %B}` | current date |
-| `{cpu.name}`, `{gpu.name}` | hardware names |
+| `{cpu.name}`, `{gpu.name}`, `{net.iface}` | hardware names / busiest interface |
 
-Metric keys: `cpu.temp`, `cpu.usage`, `cpu.freq` (MHz), `cpu.power` (W),
-`gpu.temp`, `gpu.usage`, `gpu.freq`, `gpu.memfreq`, `gpu.power`, `gpu.vram` (MB),
-`gpu.vram_total`, `gpu.vram_pct`, `mem.used` (MB), `mem.total`, `mem.pct`.
+Metric keys (the app lists them under *Insert a metric…*; `neru metrics` shows live values):
+
+| Group | Keys |
+|---|---|
+| CPU | `cpu.temp` °C, `cpu.usage` %, `cpu.usage_max` (busiest core) %, `cpu.freq` MHz, `cpu.power` W, `cpu.cores` |
+| GPU | `gpu.temp`, `gpu.hotspot` (AMD junction), `gpu.usage`, `gpu.freq`, `gpu.memfreq`, `gpu.power`, `gpu.fan` %, `gpu.fan_rpm` (AMD), `gpu.vram` MB, `gpu.vram_total`, `gpu.vram_pct` |
+| RAM | `mem.used` MB, `mem.avail`, `mem.total`, `mem.pct`, `mem.swap_used`, `mem.swap_pct` |
+| Network | `net.down`, `net.up` (bytes/s over all physical interfaces), `net.down_mbps`, `net.up_mbps`, `net.total_down`, `net.total_up` (MB since boot) |
+| Disk | `disk.read`, `disk.write` (bytes/s, all physical drives), `disk.pct`, `disk.used` GB, `disk.total` (root filesystem), `disk.temp` (NVMe / drivetemp) |
+| Fans | `fan.1` … `fan.N` RPM (every hwmon fan, in `neru metrics` order), `fan.cpu`, `fan.pump` (guessed from labels), `fan.max` |
+| System | `sys.load1`, `sys.load5`, `sys.load15`, `sys.procs`, `sys.uptime` s |
+
 Temperatures are °C (°F when the app is set to Fahrenheit). A missing value prints `--`.
 
 ### `bar`
@@ -74,6 +89,29 @@ Temperatures are °C (°F when the app is set to Fahrenheit). A missing value pr
 Arc centred on `x`/`y`: `r`, `thickness`, `metric`, `min`, `max`,
 `start` (degrees clockwise from 12 o'clock, e.g. `-135`), `sweep` (e.g. `270`),
 `color`, `track`, `round_caps`, `ramp`.
+
+### `graph`
+
+The last `seconds` of a metric in a `w`×`h` box at `x`/`y`; time runs left to
+right with the newest value pinned to the right edge. Neru keeps an hour of
+history for every metric, sampled at the sensor interval.
+
+| Field | Default | |
+|---|---|---|
+| `metric` | `cpu.usage` | |
+| `seconds` | 60 | window length |
+| `min`, `max` | 0, 100 | vertical scale |
+| `auto_scale` | false | ignore `min`/`max`, fit the samples (use for speeds) |
+| `style` | `area` | `line`, `area` (filled), `bars` |
+| `color` | `#3dd6ff` | line / bars |
+| `fill` | `#3dd6ff40` | area under the line; `#rrggbbaa` alpha is honoured, `none` disables |
+| `track` | `#15152280` | box background, `none` for transparent |
+| `stroke_width` | 3 | |
+| `radius` | 12 | box corner radius |
+| `smooth` | true | spline instead of straight segments |
+| `ramp` | | colour by the current value |
+
+Colours anywhere in a theme may carry alpha (`#rrggbbaa`).
 
 ### `rect`, `ellipse`, `line`
 

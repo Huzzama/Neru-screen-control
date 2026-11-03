@@ -22,6 +22,7 @@ export interface EngineStatus {
   connected: boolean;
   screen: ScreenSummary | null;
   detected: string[];
+  recognised_only: string[];
   needs_udev: boolean;
   last_error: string | null;
   paused: boolean;
@@ -39,30 +40,40 @@ export interface CpuMetrics {
   name: string;
   temp_c: number | null;
   usage_pct: number | null;
+  usage_max_pct: number | null;
   freq_mhz: number | null;
   power_w: number | null;
+  cores: number;
 }
 
 export interface GpuMetrics {
   vendor: "amd" | "nvidia" | "intel" | null;
   name: string;
   temp_c: number | null;
+  hotspot_c: number | null;
   usage_pct: number | null;
   core_mhz: number | null;
   mem_mhz: number | null;
   power_w: number | null;
   vram_used_mb: number | null;
   vram_total_mb: number | null;
+  fan_pct: number | null;
+  fan_rpm: number | null;
 }
 
 export interface Snapshot {
   uptime_s: number;
   cpu: CpuMetrics;
   gpu: GpuMetrics | null;
-  mem: { used_mb: number; total_mb: number; pct: number };
+  mem: { used_mb: number; total_mb: number; pct: number; avail_mb: number; swap_used_mb: number; swap_total_mb: number };
+  net: { iface: string; down_bps: number | null; up_bps: number | null; total_down_mb: number | null; total_up_mb: number | null };
+  disk: { read_bps: number | null; write_bps: number | null; used_gb: number | null; total_gb: number | null; pct: number | null; temp_c: number | null };
+  sys: { load1: number | null; load5: number | null; load15: number | null; procs: number | null; uptime_s: number | null };
+  fans: { id: string; label: string; rpm: number | null }[];
 }
 
 // ── Config ──────────────────────────────────────────────────────────────────
+export type HwAccel = "off" | "auto" | "nvidia" | "vaapi";
 export type PixelFormat = "rgb565_be" | "rgb565_le" | "bgr565_be" | "bgr565_le" | "grb565_le" | "rgb888" | "bgr888";
 
 export interface AppConfig {
@@ -76,7 +87,7 @@ export interface AppConfig {
     thermalright: { rotation: number; flip_y: boolean; offset_y: number; offset_x: number; pixel_format: PixelFormat };
   };
   metrics: { interval_ms: number; fahrenheit: boolean };
-  app: { start_on_login: boolean; launch_hidden: boolean; tray_icon: boolean; minimize_on_close: boolean };
+  app: { start_on_login: boolean; launch_hidden: boolean; tray_icon: boolean; minimize_on_close: boolean; video_hwaccel: HwAccel; gpu_window: boolean };
   rgb: RgbConfig;
 }
 
@@ -122,6 +133,12 @@ export interface GaugeEl extends ElementBase {
   r: number; thickness: number; metric: string; min: number; max: number;
   start: number; sweep: number; color: string; track: string; round_caps: boolean; ramp: Stop[];
 }
+export type GraphStyle = "line" | "area" | "bars";
+export interface GraphEl extends ElementBase {
+  type: "graph";
+  w: number; h: number; metric: string; seconds: number; min: number; max: number; auto_scale: boolean;
+  style: GraphStyle; color: string; fill: string; track: string; stroke_width: number; radius: number; smooth: boolean; ramp: Stop[];
+}
 export interface RectEl extends ElementBase {
   type: "rect";
   w: number; h: number; fill: string; stroke: string; stroke_width: number; radius: number;
@@ -138,7 +155,7 @@ export interface ImageEl extends ElementBase {
   type: "image";
   w: number; h: number; path: string; fit: Fit;
 }
-export type Element = TextEl | BarEl | GaugeEl | RectEl | EllipseEl | LineEl | ImageEl;
+export type Element = TextEl | BarEl | GaugeEl | GraphEl | RectEl | EllipseEl | LineEl | ImageEl;
 export type ElementType = Element["type"];
 
 export interface Theme {
@@ -171,7 +188,7 @@ export interface MediaInfo { name: string; path: string; size: number; kind: "im
 export interface UdevStatus { installed: boolean; path: string; needed: boolean }
 export interface AppInfo {
   version: string; config_dir: string; themes_dir: string; media_dir: string; assets_dir: string | null;
-  exe: string; background_mode: boolean; ffmpeg: boolean;
+  exe: string; background_mode: boolean; ffmpeg: boolean; hwaccels: string[]; gpu_window_env: boolean;
 }
 export interface MetricKey { key: string; label: string; unit: string }
 
@@ -183,18 +200,24 @@ export type Effect =
   | { kind: "rainbow"; speed: number; spread: number }
   | { kind: "color_cycle"; colors: string[]; period_s: number }
   | { kind: "temperature"; metric: string; ramp: Stop[] }
-  | { kind: "hardware"; mode: string; color: string | null; speed: number | null; brightness: number | null };
+  | { kind: "gradient"; colors: string[]; speed: number; repeat: number }
+  | { kind: "wave"; color: string; background: string; period_s: number; width: number; bounce: boolean }
+  | { kind: "chase"; color: string; background: string; period_s: number; count: number; width: number }
+  | { kind: "twinkle"; color: string; background: string; density: number; period_s: number }
+  | { kind: "strobe"; color: string; hz: number; duty: number }
+  | { kind: "candle"; color: string; intensity: number }
+  | { kind: "hardware"; mode: string; color: string | null; speed: number | null; brightness: number | null; direction?: number | null };
 
 export interface RgbAssignment { controller: string; zone: number | null; effect: Effect }
-export interface RgbConfig { enabled: boolean; server: string; fps: number; brightness: number; assignments: RgbAssignment[]; start_server: boolean }
+export interface RgbConfig { enabled: boolean; server: string; fps: number; brightness: number; assignments: RgbAssignment[]; use_openrgb: boolean; start_server: boolean; zone_sizes: Record<string, number> }
 export interface RgbMode {
   name: string; value: number; flags: number; speed_min: number; speed_max: number; brightness_min: number; brightness_max: number;
   colors_min: number; colors_max: number; speed: number; brightness: number; direction: number; color_mode: number; colors: { r: number; g: number; b: number }[];
 }
-export interface RgbZone { index: number; name: string; leds_count: number; start_idx: number; matrix: [number, number] | null; segments: string[]; preview: string[]; effect: Effect | null }
+export interface RgbZone { index: number; name: string; leds_count: number; leds_min: number; leds_max: number; start_idx: number; matrix: [number, number] | null; segments: string[]; preview: string[]; effect: Effect | null }
 export interface RgbController {
   key: string; index: number; name: string; vendor: string; kind: string; description: string; location: string; version: string; serial: string;
-  active_mode: number; modes: RgbMode[]; zones: RgbZone[]; leds: number; software: boolean;
+  active_mode: number; modes: RgbMode[]; zones: RgbZone[]; leds: number; software: boolean; native: boolean;
 }
 // ── Fans ────────────────────────────────────────────────────────────────────
 export interface FanSensor { id: string; chip: string; label: string; temp_c: number | null }
@@ -212,7 +235,7 @@ export interface FanStatus {
   config: FanConfig; states: FanChannelState[]; error: string | null; presets: [string, [number, number][]][];
 }
 
-export interface RgbStatus { enabled: boolean; connected: boolean; server: string; protocol: number; error: string | null; controllers: RgbController[]; profiles: string[]; fps_actual: number; last_message: string | null }
+export interface RgbStatus { enabled: boolean; connected: boolean; use_openrgb: boolean; native_devices: number; native_errors: string[]; server: string; protocol: number; error: string | null; controllers: RgbController[]; profiles: string[]; fps_actual: number; last_message: string | null }
 export interface PreviewFrame { data: string; width: number; height: number; seq: number }
 
 // ── Calls ───────────────────────────────────────────────────────────────────
@@ -243,6 +266,7 @@ export const api = {
   autostartSet: (enabled: boolean) => invoke<void>("autostart_set", { enabled }),
   appInfo: () => invoke<AppInfo>("app_info"),
   metricKeys: () => invoke<MetricKey[]>("metric_keys"),
+  metricHistory: (key: string, seconds: number) => invoke<[number, number][]>("metric_history", { key, seconds }),
   thumbnail: (id: string, max = 320) => invoke<string>("theme_thumbnail", { id, max }),
   rgbStatus: () => invoke<RgbStatus>("rgb_status"),
   rgbSetAssignment: (controller: string, zone: number | null, effect: Effect | null) => invoke<void>("rgb_set_assignment", { controller, zone, effect }),
@@ -253,6 +277,8 @@ export const api = {
   rgbProfile: (op: "load" | "save" | "delete", name: string) => invoke<void>("rgb_profile", { op, name }),
   rgbSaveToDevice: (controller: string) => invoke<void>("rgb_save_to_device", { controller }),
   rgbStartServer: () => invoke<string>("rgb_start_server"),
+  rgbSetZoneSize: (controller: string, zone: number, leds: number) => invoke<void>("rgb_set_zone_size", { controller, zone, leds }),
+  rgbRescanNative: () => invoke<void>("rgb_rescan_native"),
   onRgbStatus: (cb: (s: RgbStatus) => void): Promise<UnlistenFn> => listen<RgbStatus>("rgb-status", (e) => cb(e.payload)),
   fansStatus: () => invoke<FanStatus>("fans_status"),
   fansSetConfig: (config: FanConfig) => invoke<void>("fans_set_config", { config }),

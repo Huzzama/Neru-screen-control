@@ -145,10 +145,24 @@ pub enum Kind {
     Text(Text),
     Bar(Bar),
     Gauge(Gauge),
+    Graph(Graph),
     Rect(Rect),
     Ellipse(Ellipse),
     Line(Line),
     Image(Image),
+}
+
+impl Kind {
+    /// The metric this element reads, if any.
+    pub fn metric(&self) -> Option<&str> {
+        match self {
+            Kind::Bar(b) => Some(&b.metric),
+            Kind::Gauge(g) => Some(&g.metric),
+            Kind::Graph(g) => Some(&g.metric),
+            Kind::Text(t) => t.ramp_metric.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 /// Text with placeholders: `{cpu.temp}`, `{cpu.temp:1}` (decimals),
@@ -255,6 +269,70 @@ impl Default for Gauge {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphStyle {
+    /// A line.
+    Line,
+    /// A line with the area under it filled.
+    #[default]
+    Area,
+    /// One bar per sample.
+    Bars,
+}
+
+/// History of a metric over the last `seconds`, drawn in a `w`×`h` box at
+/// (x, y). Time runs left → right, newest sample at the right edge.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Graph {
+    pub w: f32,
+    pub h: f32,
+    pub metric: String,
+    /// Window length.
+    pub seconds: f32,
+    pub min: f32,
+    pub max: f32,
+    /// Ignore `min`/`max` and fit the samples (with a little headroom).
+    pub auto_scale: bool,
+    pub style: GraphStyle,
+    /// Line colour (and bar colour).
+    pub color: String,
+    /// Area fill under the line (`none` to disable); usually the line colour with alpha.
+    pub fill: String,
+    /// Box background (`none` for transparent).
+    pub track: String,
+    pub stroke_width: f32,
+    /// Box corner radius.
+    pub radius: f32,
+    /// Smooth the line (Catmull-Rom) instead of straight segments.
+    pub smooth: bool,
+    /// Colour by the *current* value.
+    pub ramp: Vec<Stop>,
+}
+
+impl Default for Graph {
+    fn default() -> Self {
+        Self {
+            w: 300.0,
+            h: 100.0,
+            metric: "cpu.usage".into(),
+            seconds: 60.0,
+            min: 0.0,
+            max: 100.0,
+            auto_scale: false,
+            style: GraphStyle::Area,
+            color: "#3dd6ff".into(),
+            fill: "#3dd6ff40".into(),
+            track: "#15152280".into(),
+            stroke_width: 3.0,
+            radius: 12.0,
+            smooth: true,
+            ramp: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Rect {
@@ -341,11 +419,21 @@ mod tests {
                 {"id": "a", "type": "text", "x": 10, "y": 50, "text": "CPU {cpu.temp:0}°"},
                 {"id": "b", "type": "bar", "x": 10, "y": 60, "metric": "gpu.usage", "w": 100},
                 {"id": "c", "type": "gauge", "x": 160, "y": 160},
-                {"id": "d", "type": "image", "x": 0, "y": 0, "w": 50, "h": 50, "path": "logo.png", "fit": "contain"}
+                {"id": "d", "type": "image", "x": 0, "y": 0, "w": 50, "h": 50, "path": "logo.png", "fit": "contain"},
+                {"id": "e", "type": "graph", "x": 0, "y": 200, "metric": "net.down", "seconds": 120, "auto_scale": true, "style": "bars"}
             ]
         }"##;
         let t = Theme::from_json(json).unwrap();
-        assert_eq!(t.elements.len(), 4);
+        assert_eq!(t.elements.len(), 5);
+        match &t.elements[4].kind {
+            Kind::Graph(g) => {
+                assert_eq!(g.seconds, 120.0);
+                assert!(g.auto_scale);
+                assert_eq!(g.style, GraphStyle::Bars);
+                assert_eq!(g.w, 300.0);
+            }
+            _ => panic!(),
+        }
         match &t.elements[0].kind {
             Kind::Text(tx) => assert_eq!(tx.size, 48.0),
             _ => panic!(),

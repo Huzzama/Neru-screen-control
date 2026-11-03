@@ -64,6 +64,7 @@
         "section": "utils",
         "files": {
           "/usr/lib/udev/rules.d/70-neru-screen-control.rules": "../packaging/shared/70-neru-screen-control.rules",
+          "/usr/lib/modules-load.d/neru-screen-control.conf": "../packaging/shared/neru-screen-control-modules.conf",
           "/usr/lib/systemd/system/neru-fand.service": "../packaging/shared/neru-fand.service"
         },
         "postInstallScript": "../packaging/debian/postinst",

@@ -95,6 +95,15 @@ enum RgbCmd {
         #[arg(long, default_value = "127.0.0.1:6742")]
         server: String,
     },
+    /// Probe Neru's own RGB drivers (no OpenRGB): list devices and zones
+    Native {
+        /// Paint every zone with this colour (rrggbb) after probing
+        #[arg(long)]
+        color: Option<String>,
+        /// LEDs per ARGB header for --color (headers start at 0 LEDs)
+        #[arg(long, default_value_t = 30)]
+        leds: u32,
+    },
     /// Set every LED of a device (or one zone) to a colour, e.g. `ff0000`
     Set {
         device: u32,
@@ -104,6 +113,8 @@ enum RgbCmd {
         #[arg(long, default_value = "127.0.0.1:6742")]
         server: String,
     },
+    /// List I²C adapters with the PCI device behind each (GPU RGB lives here)
+    I2c,
 }
 
 #[derive(Subcommand)]
@@ -184,7 +195,9 @@ fn run() -> anyhow::Result<()> {
             Ok(())
         }
         Cmd::Rgb(RgbCmd::Devices { server }) => rgb_devices(&server),
+        Cmd::Rgb(RgbCmd::Native { color, leds }) => rgb_native(color.as_deref(), leds),
         Cmd::Rgb(RgbCmd::Set { device, color, zone, server }) => rgb_set(&server, device, &color, zone),
+        Cmd::Rgb(RgbCmd::I2c) => rgb_i2c(),
     }
 }
 
@@ -216,6 +229,88 @@ fn rgb_devices(server: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn rgb_native(color: Option<&str>, leds: u32) -> anyhow::Result<()> {
+    use neru_core::rgb::{native::NativeHub, Color};
+    let mut hub = NativeHub::default();
+    hub.scan(&Default::default());
+    for e in &hub.errors {
+        println!("error: {e}");
+    }
+    let list = hub.controllers();
+    if list.is_empty() {
+        println!("no natively supported RGB device found");
+        return Ok(());
+    }
+    for c in &list {
+        println!("[{}] {} — {} (firmware {}), {}", c.index, c.name, c.description, c.version, c.location);
+        for (i, z) in c.zones.iter().enumerate() {
+            let size = if z.leds_max > z.leds_min { format!("{} LEDs (resizable 0–{})", z.leds_count, z.leds_max) } else { format!("{} LEDs", z.leds_count) };
+            println!("    zone {i}: {} — {size}", z.name);
+        }
+    }
+    if let Some(color) = color {
+        let hex = if color.starts_with('#') { color.to_string() } else { format!("#{color}") };
+        let col = Color::from_hex(&hex).ok_or_else(|| anyhow::anyhow!("bad colour {color}"))?;
+        for c in &list {
+            let d = hub.device(c.index).unwrap();
+            for (i, z) in c.zones.iter().enumerate() {
+                if z.leds_max > z.leds_min {
+                    d.resize_zone(i as u32, leds)?;
+                }
+            }
+            d.set_direct()?;
+            let c2 = d.describe();
+            for (i, z) in c2.zones.iter().enumerate() {
+                d.zone_leds(i as u32, &vec![col; z.leds_count as usize])?;
+            }
+            println!("{}: every zone → {hex}", c.name);
+        }
+    }
+    Ok(())
+}
+
+fn rgb_i2c() -> anyhow::Result<()> {
+    use neru_core::i2c;
+    if !i2c::i2c_dev_available() {
+        println!("no /dev/i2c-* nodes: load the module with `sudo modprobe i2c-dev` (Neru's udev installer does this too)");
+    }
+    let list = i2c::adapters();
+    if list.is_empty() {
+        println!("no I2C adapters in /sys/bus/i2c/devices");
+        return Ok(());
+    }
+    for a in &list {
+        let access = match std::fs::OpenOptions::new().read(true).write(true).open(&a.dev) {
+            Ok(_) => "ok",
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => "no access (install the udev rules)",
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => "no device node (modprobe i2c-dev)",
+            Err(_) => "cannot open",
+        };
+        match &a.pci {
+            Some(p) => println!(
+                "{:<14} {:<44} pci {:04x}:{:04x} sub {:04x}:{:04x} @ {}  [{access}]",
+                a.dev.display(),
+                a.name,
+                p.vendor,
+                p.device,
+                p.subvendor,
+                p.subdevice,
+                p.slot
+            ),
+            None => println!("{:<14} {:<44} (no PCI device)  [{access}]", a.dev.display(), a.name),
+        }
+    }
+    let zotac = neru_core::rgb::native::zotac_gpu::find();
+    if zotac.is_empty() {
+        println!("\nno ZOTAC RTX 50 RGB controller answered at 0x4B on an NVIDIA adapter");
+    } else {
+        for f in zotac {
+            println!("\nZOTAC controller: {} on {} — zones {:?}{}", f.name, f.adapter.dev.display(), f.zones, if f.known { "" } else { " (layout guessed; please report the pci line above)" });
+        }
+    }
+    Ok(())
+}
+
 fn rgb_set(server: &str, device: u32, color: &str, zone: Option<u32>) -> anyhow::Result<()> {
     use neru_core::rgb::{Color, OpenRgbClient};
     let hex = if color.starts_with('#') { color.to_string() } else { format!("#{color}") };
@@ -238,28 +333,41 @@ fn rgb_set(server: &str, device: u32, color: &str, zone: Option<u32>) -> anyhow:
 }
 
 fn fake_snapshot() -> Snapshot {
-    use neru_core::metrics::{CpuMetrics, GpuMetrics, GpuVendor, MemMetrics};
+    use neru_core::metrics::{CpuMetrics, DiskMetrics, FanReading, GpuMetrics, GpuVendor, MemMetrics, NetMetrics, SysMetrics};
     Snapshot {
         uptime_s: 0.0,
         cpu: CpuMetrics {
             name: "AMD Ryzen 7 7800X3D 8-Core Processor".into(),
             temp_c: Some(67.4),
             usage_pct: Some(38.0),
+            usage_max_pct: Some(97.0),
             freq_mhz: Some(4850.0),
             power_w: Some(74.0),
+            cores: 16,
         },
         gpu: Some(GpuMetrics {
             vendor: Some(GpuVendor::Amd),
             name: "Radeon RX 7800 XT".into(),
             temp_c: Some(58.0),
+            hotspot_c: Some(71.0),
             usage_pct: Some(91.0),
             core_mhz: Some(2430.0),
             mem_mhz: Some(1218.0),
             power_w: Some(212.0),
             vram_used_mb: Some(9120.0),
             vram_total_mb: Some(16368.0),
+            fan_pct: Some(46.0),
+            fan_rpm: Some(1480.0),
         }),
-        mem: MemMetrics { used_mb: 13850.0, total_mb: 32048.0, pct: 43.2 },
+        mem: MemMetrics { used_mb: 13850.0, total_mb: 32048.0, pct: 43.2, avail_mb: 18198.0, swap_used_mb: 0.0, swap_total_mb: 8192.0 },
+        net: NetMetrics { iface: "enp5s0".into(), down_bps: Some(12.4 * 1048576.0), up_bps: Some(1.1 * 1048576.0), total_down_mb: Some(84210.0), total_up_mb: Some(9120.0) },
+        disk: DiskMetrics { read_bps: Some(210.0 * 1048576.0), write_bps: Some(48.0 * 1048576.0), used_gb: Some(812.0), total_gb: Some(2000.0), pct: Some(40.6), temp_c: Some(41.0) },
+        sys: SysMetrics { load1: Some(1.42), load5: Some(1.10), load15: Some(0.98), procs: Some(412.0), uptime_s: Some(3.0 * 86400.0 + 4.0 * 3600.0 + 12.0 * 60.0) },
+        fans: vec![
+            FanReading { id: "nct6798:fan1".into(), label: "CPU Fan".into(), rpm: Some(1120.0) },
+            FanReading { id: "nct6798:fan2".into(), label: "Pump".into(), rpm: Some(2650.0) },
+            FanReading { id: "nct6798:fan3".into(), label: "Chassis Fan 1".into(), rpm: Some(860.0) },
+        ],
     }
 }
 
@@ -539,6 +647,7 @@ fn metrics(watch: bool, json: bool) -> anyhow::Result<()> {
             println!("{}", serde_json::to_string(&snap)?);
         } else {
             let f = |v: Option<f32>, unit: &str| v.map_or("  -".to_string(), |v| format!("{v:.0}{unit}"));
+            let speed = |v: Option<f32>| v.map_or("-".to_string(), |v| neru_core::render::values::format_value(v, "speed"));
             println!(
                 "CPU {:>5} {:>5} {:>8} {:>5}   RAM {:>5} ({:.0}/{:.0} MB){}",
                 f(snap.cpu.temp_c, "°C"),
@@ -549,14 +658,30 @@ fn metrics(watch: bool, json: bool) -> anyhow::Result<()> {
                 snap.mem.used_mb,
                 snap.mem.total_mb,
                 snap.gpu.as_ref().map_or(String::new(), |g| format!(
-                    "   GPU {:>5} {:>5} {:>8} {:>5}  VRAM {}/{} MB",
+                    "   GPU {:>5} {:>5} {:>8} {:>5}  VRAM {}/{} MB  fan {}",
                     f(g.temp_c, "°C"),
                     f(g.usage_pct, "%"),
                     f(g.core_mhz, " MHz"),
                     f(g.power_w, " W"),
                     g.vram_used_mb.map_or("-".into(), |v| format!("{v:.0}")),
                     g.vram_total_mb.map_or("-".into(), |v| format!("{v:.0}")),
+                    f(g.fan_pct, "%"),
                 ))
+            );
+            println!(
+                "    NET ↓{} ↑{} ({})   DISK r {} w {} {}   load {}  fans: {}",
+                speed(snap.net.down_bps),
+                speed(snap.net.up_bps),
+                if snap.net.iface.is_empty() { "-" } else { snap.net.iface.as_str() },
+                speed(snap.disk.read_bps),
+                speed(snap.disk.write_bps),
+                snap.disk.pct.map_or(String::new(), |p| format!("({p:.0}% used)")),
+                snap.sys.load1.map_or("-".into(), |l| format!("{l:.2}")),
+                if snap.fans.is_empty() {
+                    "none".to_string()
+                } else {
+                    snap.fans.iter().map(|x| format!("{}={}", x.label, f(x.rpm, ""))).collect::<Vec<_>>().join(" ")
+                }
             );
         }
         if !watch || stop.load(Ordering::Relaxed) {
@@ -576,9 +701,7 @@ fn udev(install: bool) -> anyhow::Result<()> {
         eprintln!("\nInstall with:  neru udev --install   (or copy the text above to {UDEV_FILE})");
         return Ok(());
     }
-    let script = format!(
-        "set -e; cat > {UDEV_FILE} <<'EOF'\n{rules}EOF\nudevadm control --reload-rules && udevadm trigger"
-    );
+    let script = neru_core::screen::udev_install_script(UDEV_FILE);
     let status = std::process::Command::new("pkexec")
         .args(["sh", "-c", &script])
         .status()
@@ -586,6 +709,6 @@ fn udev(install: bool) -> anyhow::Result<()> {
     if !status.success() {
         bail!("installation failed (status {status})");
     }
-    println!("installed {UDEV_FILE}. Unplug and replug the screen's USB cable (or reboot).");
+    println!("installed {UDEV_FILE} and {}. Unplug and replug the screen's USB cable (or reboot).", neru_core::i2c::MODULES_LOAD_FILE);
     Ok(())
 }

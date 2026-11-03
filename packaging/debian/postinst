@@ -9,4 +9,6 @@ fi
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload || true
 fi
+# GPU / DRAM RGB controllers are reached over I2C.
+modprobe i2c-dev 2>/dev/null || true; modprobe i2c-piix4 2>/dev/null || true; modprobe i2c-i801 2>/dev/null || true
 exit 0

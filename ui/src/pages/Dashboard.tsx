@@ -43,6 +43,21 @@ export function Dashboard({ status, goTo }: { status: EngineStatus; goTo: (p: Pa
   const cpu = metrics?.cpu;
   const gpu = metrics?.gpu;
   const mem = metrics?.mem;
+  const net = metrics?.net;
+  const disk = metrics?.disk;
+  // Spinning fans first; headers without a tach signal (0 rpm) go last.
+  const fans = [...(metrics?.fans ?? [])].sort((a, b) => Number((b.rpm ?? 0) > 0) - Number((a.rpm ?? 0) > 0));
+  const speed = (bps: number | null | undefined) => {
+    if (bps == null) return "--";
+    const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+    let v = Math.max(0, bps);
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) {
+      v /= 1024;
+      i += 1;
+    }
+    return `${v.toFixed(i === 0 ? 0 : v < 10 ? 2 : v < 100 ? 1 : 0)} ${units[i]}`;
+  };
   const f = config?.metrics.fahrenheit ?? false;
   const temp = (c: number | null | undefined) => (c == null ? "--" : f ? ((c * 9) / 5 + 32).toFixed(0) : c.toFixed(0));
   const tUnit = f ? "°F" : "°C";
@@ -120,6 +135,13 @@ export function Dashboard({ status, goTo }: { status: EngineStatus; goTo: (p: Pa
             <p className="muted small">
               {status.detected.length ? `Seen on the bus: ${status.detected.join(", ")}` : "Plug in a supported Thermaltake or Thermalright screen. The app reconnects automatically."}
             </p>
+          )}
+          {(status.recognised_only ?? []).length > 0 && (
+            <div className="banner info small" style={{ marginTop: 10 }}>
+              {status.recognised_only.map((r) => (
+                <div key={r}>{r}</div>
+              ))}
+            </div>
           )}
 
           <div className="row-wrap" style={{ marginTop: 16 }}>
@@ -223,6 +245,22 @@ export function Dashboard({ status, goTo }: { status: EngineStatus; goTo: (p: Pa
             pct={gpu?.vram_used_mb != null && gpu.vram_total_mb ? (gpu.vram_used_mb / gpu.vram_total_mb) * 100 : null}
             violet
           />
+          <Tile label="Network" value={speed(net?.down_bps)} sub={`↑ ${speed(net?.up_bps)}${net?.iface ? ` · ${net.iface}` : ""}`} pct={null} />
+          <Tile label="Disk" value={fmt(disk?.pct)} unit="%" sub={`R ${speed(disk?.read_bps)} · W ${speed(disk?.write_bps)}${disk?.temp_c != null ? ` · ${temp(disk.temp_c)}${tUnit}` : ""}`} pct={disk?.pct ?? null} />
+          <div className="tile">
+            <span className="tile-label">Fans</span>
+            {fans.length === 0 ? (
+              <div className="small muted">{gpu?.fan_pct != null ? `GPU fan ${fmt(gpu.fan_pct)}%` : "no fan sensors (hwmon)"}</div>
+            ) : (
+              fans.slice(0, 4).map((fan) => (
+                <div key={fan.id} className="row small" style={{ gap: 6, justifyContent: "space-between" }}>
+                  <span className="muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fan.label}</span>
+                  <span className="mono" title={fan.rpm === 0 ? "no tach signal (empty header or a hub that does not report speed)" : undefined}>{fan.rpm == null ? "--" : fan.rpm === 0 ? "no tach" : `${fan.rpm.toFixed(0)} rpm`}</span>
+                </div>
+              ))
+            )}
+            {fans.length > 4 && <div className="small muted">+{fans.length - 4} more in the editor</div>}
+          </div>
           <div className="tile">
             <span className="tile-label">Sensors</span>
             <div className="row small muted" style={{ gap: 6 }}>

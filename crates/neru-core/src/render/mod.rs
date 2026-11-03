@@ -11,7 +11,7 @@ pub mod values;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use image::RgbImage;
@@ -22,8 +22,8 @@ pub use theme::Theme;
 
 use self::media::MediaCache;
 use self::theme::{Background, Kind};
-use self::values::Values;
-use crate::metrics::Snapshot;
+use self::values::{Values, Windows};
+use crate::metrics::{is_temperature_key, History, Snapshot};
 use crate::{Error, Result};
 
 /// Loaded fonts shared by every renderer (and listed by the editor).
@@ -153,6 +153,7 @@ pub struct Renderer {
     fonts: Arc<resvg::usvg::fontdb::Database>,
     media: MediaCache,
     smoothed: HashMap<String, f32>,
+    history: Option<Arc<RwLock<History>>>,
     canvas: Pixmap,
     out: RgbImage,
     pub fahrenheit: bool,
@@ -169,6 +170,7 @@ impl Renderer {
             fonts,
             media: MediaCache::new(media_dir),
             smoothed: HashMap::new(),
+            history: None,
             canvas,
             fahrenheit: false,
             stats: RenderStats::default(),
@@ -177,6 +179,55 @@ impl Renderer {
 
     pub fn theme(&self) -> &Theme {
         &self.theme
+    }
+
+    /// Metric history for graph elements (from the metrics collector).
+    pub fn set_history(&mut self, history: Arc<RwLock<History>>) {
+        self.history = Some(history);
+    }
+
+    /// Hardware-accelerated video decoding for media layers.
+    pub fn set_hwaccel(&mut self, hw: media::HwAccel) {
+        if self.media.hwaccel != hw {
+            self.media.hwaccel = hw;
+            self.media.clear();
+        }
+    }
+
+    /// History windows for every graph in the theme, in display units.
+    fn windows(&self, snapshot: &Snapshot) -> Option<Windows> {
+        let hist = self.history.as_ref()?;
+        let graphs: Vec<(String, f32)> = self
+            .theme
+            .elements
+            .iter()
+            .filter(|e| e.visible)
+            .filter_map(|e| match &e.kind {
+                Kind::Graph(g) => Some((g.metric.clone(), g.seconds)),
+                _ => None,
+            })
+            .collect();
+        if graphs.is_empty() {
+            return None;
+        }
+        let h = hist.read().ok()?;
+        let mut out: Windows = HashMap::new();
+        for (metric, seconds) in graphs {
+            let mut samples = h.window(&metric, seconds, snapshot.uptime_s);
+            if self.fahrenheit && is_temperature_key(&metric) {
+                for p in &mut samples {
+                    p.1 = values::c_to_f(p.1);
+                }
+            }
+            // The longest window wins when the same metric is drawn twice.
+            match out.get(&metric) {
+                Some(existing) if existing.len() >= samples.len() => {}
+                _ => {
+                    out.insert(metric, samples);
+                }
+            }
+        }
+        Some(out)
     }
 
     pub fn set_theme(&mut self, theme: Theme) -> Result<()> {
@@ -221,6 +272,12 @@ impl Renderer {
                     g.r *= s;
                     g.thickness *= s;
                 }
+                Kind::Graph(g) => {
+                    g.w *= sx;
+                    g.h *= sy;
+                    g.radius *= s;
+                    g.stroke_width *= s;
+                }
                 Kind::Rect(r) => {
                     r.w *= sx;
                     r.h *= sy;
@@ -263,11 +320,13 @@ impl Renderer {
 
     /// The editor preview: the whole theme as one SVG string with current values.
     pub fn preview_svg(&self, snapshot: &Snapshot) -> String {
+        let windows = self.windows(snapshot);
         let values = Values {
             snapshot,
             fahrenheit: self.fahrenheit,
             smoothed: &self.smoothed,
             now: chrono::Local::now(),
+            windows: windows.as_ref(),
         };
         svg::full_document(&self.theme, &values)
     }
@@ -305,6 +364,7 @@ impl Renderer {
 
         // Elements, in order, flushing the SVG run whenever a raster is drawn.
         let now = chrono::Local::now();
+        let windows = self.windows(snapshot);
         let elements = std::mem::take(&mut self.theme.elements);
         for el in &elements {
             if let Kind::Image(img) = &el.kind {
@@ -334,7 +394,7 @@ impl Renderer {
                 media_ms += t.elapsed().as_secs_f32() * 1000.0;
                 continue;
             }
-            let values = Values { snapshot, fahrenheit: self.fahrenheit, smoothed: &self.smoothed, now };
+            let values = Values { snapshot, fahrenheit: self.fahrenheit, smoothed: &self.smoothed, now, windows: windows.as_ref() };
             if let Some(s) = svg::element_svg(el, &values) {
                 pending.push_str(&s);
             }

@@ -1,9 +1,9 @@
 import { openPath } from "@tauri-apps/plugin-opener";
-import { ExternalLink, FolderOpen, ShieldCheck, Usb } from "lucide-react";
+import { Cpu, ExternalLink, FolderOpen, ShieldCheck, Usb } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Field, NumberInput, Select, SwitchRow, useToast } from "../components/ui";
-import { api, errText, type AppInfo, type DetectedScreen, type EngineStatus, type PixelFormat, type UdevStatus } from "../lib/api";
+import { api, errText, type AppInfo, type DetectedScreen, type EngineStatus, type HwAccel, type PixelFormat, type UdevStatus } from "../lib/api";
 import { useConfig } from "../lib/hooks";
 
 const PIXEL_FORMATS: PixelFormat[] = ["rgb565_be", "rgb565_le", "bgr565_be", "bgr565_le", "grb565_le", "rgb888", "bgr888"];
@@ -85,6 +85,43 @@ export function SettingsPage({ status }: { status: EngineStatus }) {
       </div>
 
       <div className="card">
+        <div className="card-head">
+          <div className="card-title">
+            <Cpu size={18} />
+            Hardware acceleration
+          </div>
+          <span className="badge">NVIDIA · AMD · Intel</span>
+        </div>
+        <div style={{ maxWidth: 420, marginBottom: 6 }}>
+          <Field
+            label="Video decoding (backgrounds and video layers)"
+            hint={
+              info?.ffmpeg
+                ? `Decodes with the GPU instead of the CPU. ffmpeg here supports: ${info.hwaccels.length ? info.hwaccels.join(", ") : "no accelerators"}. Running videos restart when this changes.`
+                : "Install ffmpeg to play videos; acceleration then uses NVDEC (NVIDIA) or VA-API (AMD/Intel)."
+            }
+          >
+            <Select<HwAccel>
+              value={config.app.video_hwaccel}
+              options={[
+                { value: "off", label: "Software (CPU)" },
+                { value: "auto", label: "Auto — try the GPU, fall back to software" },
+                { value: "nvidia", label: "NVIDIA (CUDA / NVDEC)" },
+                { value: "vaapi", label: "AMD / Intel (VA-API)" },
+              ]}
+              onChange={(video_hwaccel) => save((c) => ({ ...c, app: { ...c.app, video_hwaccel } }))}
+            />
+          </Field>
+        </div>
+        <SwitchRow
+          title="GPU rendering for the app window"
+          desc={`Lets WebKit draw this window through the GPU (DMA-BUF). Smoother, but NVIDIA on Wayland can show a blank window with it on — turn it back off if that happens. Takes effect after restarting Neru${info ? ` (currently ${info.gpu_window_env ? "on" : "off"})` : ""}.`}
+          on={config.app.gpu_window}
+          onChange={(v) => save((c) => ({ ...c, app: { ...c.app, gpu_window: v } }))}
+        />
+      </div>
+
+      <div className="card">
         <div className="card-title" style={{ marginBottom: 12 }}>
           Metrics
         </div>
@@ -98,9 +135,10 @@ export function SettingsPage({ status }: { status: EngineStatus }) {
 
       <div className="card">
         <div className="card-title" style={{ marginBottom: 12 }}>
-          RGB (OpenRGB)
+          RGB
         </div>
-        <SwitchRow title="RGB control" desc="Connect to the OpenRGB SDK server and drive the lighting." on={config.rgb.enabled} onChange={(v) => save((c) => ({ ...c, rgb: { ...c.rgb, enabled: v } }))} />
+        <SwitchRow title="RGB control" desc="Drive lighting with Neru's own drivers (ASUS Aura motherboards, ZOTAC RTX 50 cards, …)." on={config.rgb.enabled} onChange={(v) => save((c) => ({ ...c, rgb: { ...c.rgb, enabled: v } }))} />
+        <SwitchRow title="Use OpenRGB for other devices" desc="Optional. Devices Neru has no driver for yet are reached through an installed OpenRGB." on={config.rgb.use_openrgb} onChange={(v) => save((c) => ({ ...c, rgb: { ...c.rgb, use_openrgb: v } }))} />
         <SwitchRow title="Start the OpenRGB server when needed" desc="Runs `openrgb --server` headless if nothing answers on the address below (OpenRGB must be installed)." on={config.rgb.start_server} onChange={(v) => save((c) => ({ ...c, rgb: { ...c.rgb, start_server: v } }))} />
         <div className="grid grid-2" style={{ marginTop: 12 }}>
           <Field label="Server address" hint="host:port of the OpenRGB SDK server.">
@@ -121,8 +159,9 @@ export function SettingsPage({ status }: { status: EngineStatus }) {
           <span className={`badge ${udev?.installed ? "green" : status.needs_udev ? "red" : ""}`}>{udev?.installed ? "rules installed" : status.needs_udev ? "needed" : "not installed"}</span>
         </div>
         <p className="small muted" style={{ marginBottom: 12 }}>
-          Linux only lets root talk to USB devices unless a udev rule grants access. Neru installs one rule file for every screen it supports
-          (<code className="small">{udev?.path}</code>). Asks for your password once; unplug and replug the screen afterwards.
+          Linux only lets root talk to USB and I²C devices unless a udev rule grants access. Neru installs one rule file covering every screen and
+          RGB device it supports (<code className="small">{udev?.path}</code>) and loads the <code className="small">i2c-dev</code> module GPUs need.
+          Asks for your password once; unplug and replug the screen afterwards.
         </p>
         <div className="row-wrap">
           <button

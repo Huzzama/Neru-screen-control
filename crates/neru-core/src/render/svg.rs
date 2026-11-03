@@ -5,8 +5,8 @@
 
 use std::fmt::Write;
 
-use super::theme::{Align, Background, Element, Kind, Theme};
-use super::values::{ramp_color, Values};
+use super::theme::{Align, Background, Element, GraphStyle, Kind, Theme};
+use super::values::{parse_color, ramp_color, Values};
 
 pub fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -33,6 +33,46 @@ fn num(v: f32) -> String {
     } else {
         format!("{r}")
     }
+}
+
+/// `attr="#rrggbb" attr-opacity="a"` for a colour that may carry alpha
+/// (`#rrggbbaa`), so the markup stays SVG 1.1. `none` and unparsable
+/// strings pass through unchanged.
+fn paint(attr: &str, color: &str) -> String {
+    match parse_color(color) {
+        Some([r, g, b, a]) if a < 255 => format!(" {attr}=\"#{r:02x}{g:02x}{b:02x}\" {attr}-opacity=\"{}\"", num(a as f32 / 255.0)),
+        _ => format!(" {attr}=\"{}\"", escape(color)),
+    }
+}
+
+/// Catmull-Rom spline through `pts` as an SVG path (`M … C …`).
+fn smooth_path(pts: &[(f32, f32)]) -> String {
+    let mut d = String::new();
+    if pts.is_empty() {
+        return d;
+    }
+    let _ = write!(d, "M {} {}", num(pts[0].0), num(pts[0].1));
+    if pts.len() == 1 {
+        return d;
+    }
+    for i in 0..pts.len() - 1 {
+        let p0 = pts[i.saturating_sub(1)];
+        let p1 = pts[i];
+        let p2 = pts[i + 1];
+        let p3 = pts[(i + 2).min(pts.len() - 1)];
+        let c1 = (p1.0 + (p2.0 - p0.0) / 6.0, p1.1 + (p2.1 - p0.1) / 6.0);
+        let c2 = (p2.0 - (p3.0 - p1.0) / 6.0, p2.1 - (p3.1 - p1.1) / 6.0);
+        let _ = write!(d, " C {} {} {} {} {} {}", num(c1.0), num(c1.1), num(c2.0), num(c2.1), num(p2.0), num(p2.1));
+    }
+    d
+}
+
+fn line_path(pts: &[(f32, f32)]) -> String {
+    let mut d = String::new();
+    for (i, p) in pts.iter().enumerate() {
+        let _ = write!(d, "{}{} {}", if i == 0 { "M " } else { " L " }, num(p.0), num(p.1));
+    }
+    d
 }
 
 /// Fraction 0..1 of `value` between `min` and `max`.
@@ -144,13 +184,13 @@ pub fn element_svg(el: &Element, values: &Values<'_>) -> Option<String> {
             let r = b.radius.min(b.w / 2.0).min(b.h / 2.0);
             let _ = write!(
                 s,
-                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\" fill=\"{}\"/>",
+                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\"{}/>",
                 num(el.x),
                 num(el.y),
                 num(b.w),
                 num(b.h),
                 num(r),
-                escape(&b.track)
+                paint("fill", &b.track)
             );
             if f > 0.0 {
                 // Clip the fill to the rounded track so partial fills keep the shape.
@@ -162,9 +202,9 @@ pub fn element_svg(el: &Element, values: &Values<'_>) -> Option<String> {
                 };
                 let _ = write!(
                     s,
-                    "<clipPath id=\"{clip}\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\"/></clipPath><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" clip-path=\"url(#{clip})\"/>",
+                    "<clipPath id=\"{clip}\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\"/></clipPath><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{} clip-path=\"url(#{clip})\"/>",
                     num(el.x), num(el.y), num(b.w), num(b.h), num(r),
-                    num(fx), num(fy), num(fw), num(fh), escape(&color)
+                    num(fx), num(fy), num(fw), num(fh), paint("fill", &color)
                 );
             }
         }
@@ -176,45 +216,135 @@ pub fn element_svg(el: &Element, values: &Values<'_>) -> Option<String> {
             let r = g.r.max(1.0);
             let _ = write!(
                 s,
-                "<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{}\" stroke-linecap=\"{cap}\"/>",
+                "<path d=\"{}\" fill=\"none\"{} stroke-width=\"{}\" stroke-linecap=\"{cap}\"/>",
                 arc_path(el.x, el.y, r, g.start, g.sweep),
-                escape(&g.track),
+                paint("stroke", &g.track),
                 num(g.thickness)
             );
             if f > 0.0 {
                 let _ = write!(
                     s,
-                    "<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{}\" stroke-linecap=\"{cap}\"/>",
+                    "<path d=\"{}\" fill=\"none\"{} stroke-width=\"{}\" stroke-linecap=\"{cap}\"/>",
                     arc_path(el.x, el.y, r, g.start, g.sweep * f),
-                    escape(&color),
+                    paint("stroke", &color),
                     num(g.thickness)
                 );
             }
         }
+        Kind::Graph(g) => {
+            let (w, h) = (g.w.max(1.0), g.h.max(1.0));
+            let r = g.radius.min(w / 2.0).min(h / 2.0).max(0.0);
+            let clip = format!("clip-{}", escape(&el.id));
+            let _ = write!(
+                s,
+                "<clipPath id=\"{clip}\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\"/></clipPath>",
+                num(el.x), num(el.y), num(w), num(h), num(r)
+            );
+            if g.track != "none" {
+                let _ = write!(
+                    s,
+                    "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\"{}/>",
+                    num(el.x), num(el.y), num(w), num(h), num(r), paint("fill", &g.track)
+                );
+            }
+            let samples = values.window(&g.metric);
+            let current = values.get_smooth(&g.metric).or_else(|| samples.last().map(|p| p.1));
+            let color = ramp_color(&g.ramp, current, &g.color);
+            let seconds = g.seconds.max(1.0);
+            // Scale.
+            let (lo, hi) = if g.auto_scale {
+                let vals = samples.iter().map(|p| p.1).chain(current);
+                let (mut lo, mut hi) = vals.fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
+                if lo == f32::MAX {
+                    (0.0, 1.0)
+                } else {
+                    if hi - lo < 1e-3 {
+                        hi = lo + 1.0;
+                    }
+                    let pad = (hi - lo) * 0.08;
+                    lo = if lo >= 0.0 && lo - pad < 0.0 { 0.0 } else { lo - pad };
+                    (lo, hi + pad)
+                }
+            } else {
+                (g.min, g.max)
+            };
+            let span = if (hi - lo).abs() < 1e-6 { 1.0 } else { hi - lo };
+            let inset = g.stroke_width / 2.0;
+            let yof = |v: f32| el.y + inset + (h - 2.0 * inset) * (1.0 - ((v - lo) / span).clamp(0.0, 1.0));
+            let xof = |age: f32| el.x + w * (1.0 - (age / seconds).clamp(0.0, 1.0));
+            // Points oldest → newest, then the current value pinned to the right edge.
+            let mut pts: Vec<(f32, f32)> = samples.iter().map(|&(age, v)| (xof(age), yof(v))).collect();
+            if let Some(c) = current {
+                pts.push((el.x + w, yof(c)));
+            }
+            if pts.len() == 1 {
+                pts.insert(0, (el.x, pts[0].1));
+            }
+            let _ = write!(s, "<g clip-path=\"url(#{clip})\">");
+            if pts.len() >= 2 {
+                match g.style {
+                    GraphStyle::Bars => {
+                        let n = pts.len() as f32;
+                        let bw = (w / n).max(1.0);
+                        let gap = if bw > 3.0 { 1.0 } else { 0.0 };
+                        let bottom = el.y + h;
+                        for p in &pts {
+                            let bh = (bottom - p.1).max(0.0);
+                            if bh <= 0.0 {
+                                continue;
+                            }
+                            let _ = write!(
+                                s,
+                                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{}/>",
+                                num(p.0 - bw + gap / 2.0), num(p.1), num((bw - gap).max(0.5)), num(bh), paint("fill", &color)
+                            );
+                        }
+                    }
+                    GraphStyle::Line | GraphStyle::Area => {
+                        let d = if g.smooth { smooth_path(&pts) } else { line_path(&pts) };
+                        if g.style == GraphStyle::Area && g.fill != "none" {
+                            let bottom = el.y + h;
+                            let (first, last) = (pts[0], pts[pts.len() - 1]);
+                            let _ = write!(
+                                s,
+                                "<path d=\"{d} L {} {} L {} {} Z\"{} stroke=\"none\"/>",
+                                num(last.0), num(bottom), num(first.0), num(bottom), paint("fill", &g.fill)
+                            );
+                        }
+                        let _ = write!(
+                            s,
+                            "<path d=\"{d}\" fill=\"none\"{} stroke-width=\"{}\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>",
+                            paint("stroke", &color), num(g.stroke_width)
+                        );
+                    }
+                }
+            }
+            s.push_str("</g>");
+        }
         Kind::Rect(r) => {
             let _ = write!(
                 s,
-                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"/>",
+                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\"{}{} stroke-width=\"{}\"/>",
                 num(el.x),
                 num(el.y),
                 num(r.w),
                 num(r.h),
                 num(r.radius),
-                escape(&r.fill),
-                escape(&r.stroke),
+                paint("fill", &r.fill),
+                paint("stroke", &r.stroke),
                 num(r.stroke_width)
             );
         }
         Kind::Ellipse(e) => {
             let _ = write!(
                 s,
-                "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"/>",
+                "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"{}{} stroke-width=\"{}\"/>",
                 num(el.x + e.rx),
                 num(el.y + e.ry),
                 num(e.rx),
                 num(e.ry),
-                escape(&e.fill),
-                escape(&e.stroke),
+                paint("fill", &e.fill),
+                paint("stroke", &e.stroke),
                 num(e.stroke_width)
             );
         }
@@ -295,5 +425,39 @@ mod tests {
     #[test]
     fn escapes_text() {
         assert_eq!(escape("a<b&\"c\""), "a&lt;b&amp;&quot;c&quot;");
+    }
+
+    #[test]
+    fn alpha_colours_become_opacity() {
+        assert_eq!(paint("fill", "#3dd6ff40"), " fill=\"#3dd6ff\" fill-opacity=\"0.25\"");
+        assert_eq!(paint("fill", "#3dd6ff"), " fill=\"#3dd6ff\"");
+        assert_eq!(paint("stroke", "none"), " stroke=\"none\"");
+    }
+
+    #[test]
+    fn graph_draws_history() {
+        use super::super::theme::{Element, Graph, Kind};
+        use crate::metrics::Snapshot;
+        use std::collections::HashMap;
+        let mut snap = Snapshot::default();
+        snap.cpu.usage_pct = Some(50.0);
+        let smoothed = HashMap::new();
+        let mut windows: super::super::values::Windows = HashMap::new();
+        windows.insert("cpu.usage".into(), vec![(30.0, 10.0), (20.0, 90.0), (10.0, 40.0)]);
+        let values = Values { snapshot: &snap, fahrenheit: false, smoothed: &smoothed, now: chrono::Local::now(), windows: Some(&windows) };
+        let el = Element { id: "g1".into(), x: 10.0, y: 20.0, kind: Kind::Graph(Graph { w: 200.0, h: 100.0, seconds: 60.0, ..Default::default() }), ..Default::default() };
+        let svg = element_svg(&el, &values).unwrap();
+        assert!(svg.contains("clip-g1"), "{svg}");
+        assert!(svg.contains(" C "), "smooth path expected: {svg}");
+        assert!(svg.contains("fill-opacity"), "{svg}");
+        // The newest point is pinned at the right edge (x = 210).
+        assert!(svg.contains("210 "), "{svg}");
+        let bars = Element { kind: Kind::Graph(Graph { style: GraphStyle::Bars, smooth: false, ..Default::default() }), ..el.clone() };
+        let svg = element_svg(&bars, &values).unwrap();
+        assert!(svg.matches("<rect").count() >= 4, "{svg}");
+        // Without history: a flat line at the current value.
+        let values = Values { snapshot: &snap, fahrenheit: false, smoothed: &smoothed, now: chrono::Local::now(), windows: None };
+        let svg = element_svg(&el, &values).unwrap();
+        assert!(svg.contains("<path"), "{svg}");
     }
 }

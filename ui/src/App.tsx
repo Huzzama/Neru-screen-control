@@ -1,15 +1,16 @@
-import { Fan, LayoutDashboard, Lightbulb, MonitorSmartphone, Settings } from "lucide-react";
+import { Fan, HelpCircle, LayoutDashboard, Lightbulb, MonitorSmartphone, Settings } from "lucide-react";
 import { useState } from "react";
 
 import { ToastProvider } from "./components/ui";
 import { useStatus } from "./lib/hooks";
 import { Dashboard } from "./pages/Dashboard";
 import { FansPage } from "./pages/FansPage";
+import { HelpPage } from "./pages/HelpPage";
 import { RgbPage } from "./pages/RgbPage";
 import { ScreenPage } from "./pages/ScreenPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
-export type Page = "dashboard" | "screen" | "rgb" | "fans" | "settings";
+export type Page = "dashboard" | "screen" | "rgb" | "fans" | "settings" | "help";
 
 const NAV: { id: Page; label: string; icon: typeof LayoutDashboard; soon?: boolean }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -17,6 +18,7 @@ const NAV: { id: Page; label: string; icon: typeof LayoutDashboard; soon?: boole
   { id: "rgb", label: "RGB", icon: Lightbulb },
   { id: "fans", label: "Fans", icon: Fan },
   { id: "settings", label: "Settings", icon: Settings },
+  { id: "help", label: "Help", icon: HelpCircle },
 ];
 
 export default function App() {
@@ -63,6 +65,7 @@ export default function App() {
           {page === "rgb" && <RgbPage />}
           {page === "fans" && <FansPage />}
           {page === "settings" && <SettingsPage status={status} />}
+          {page === "help" && <HelpPage goTo={setPage} />}
         </main>
       </div>
     </ToastProvider>

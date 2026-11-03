@@ -91,7 +91,33 @@ SUBSYSTEM=="hidraw", ATTRS{idVendor}=="264a", ATTRS{idProduct}=="2348", MODE="06
 | Transport | USB bulk OUT `0x01` (512-byte chunks) + vendor control transfers |
 | Frames | raw framebuffer, RGB565 big-endian, row-major, 208-byte header |
 
-Recovered in Neru 1.x from a Windows USB capture (Wireshark + usbmon).
+Recovered in Neru 1.x from a Windows USB capture (Wireshark + usbmon). The
+first capture showed `1b 00 10 90 d4 43 0e b2 ff ff 00 00` at the head of the
+stream; the header below is what the driver sends per frame.
+
+The same controller sits in many Thermalright coolers with different panels;
+the size is not readable over USB, so Neru keeps one `ScreenModel` per
+resolution (the list from Neru 1.x) and the user picks the variant in
+Settings → *Use this screen* (default 320×320):
+
+| Resolution | Models (diagonal) | Model id |
+|---|---|---|
+| 320×320 | Frozen Warframe class, the original Neru hardware (2.4") | `tr-chizhu-320` |
+| 320×240 | Frozen Warframe (2.4"), Core Matrix (2.0") | `tr-chizhu-320x240` |
+| 480×480 | Peerless / Guard / Hyper / Elite Vision (3.95"), Core Vision (2.1"), Frozen Guardian / Frozen Vision (2.88") | `tr-chizhu-480` |
+| 640×480 | Mjolnir Vision, Stream Vision (3.5") | `tr-chizhu-640x480` |
+| 1280×480 | Trofeo Vision (6.98") | `tr-chizhu-1280x480` |
+| 2400×1080 | Leviathan / Rainbow / Wonder Vision (6.67") | `tr-chizhu-2400x1080` |
+
+Other Thermalright controllers are **recognised but not driven** (listed in
+`RECOGNISED_ONLY`, shown on the Dashboard): HID LCD `0416:5302` /
+`0418:5303` / `0418:5304`, SCSI-over-USB `87cd:70db` / `0416:5406` /
+`0402:3922`, chunked-bulk "LY" `0416:5408` / `0416:5409`, LED segment
+`0416:8001`. Their protocols are keyed on handshake bytes per panel (FBL / PM
+codes, JPEG vs RGB565, rotation tables) and are documented in the GPL-3.0
+[TRCC Linux](https://github.com/Lexonight1/thermalright-trcc-linux) project,
+which drives them today; porting them without hardware to test was not
+attempted. Contributions with a capture are welcome.
 
 ### Per-frame sequence
 

@@ -62,9 +62,22 @@ fn init_logging() {
         .init();
 }
 
+/// WebKit's GPU (DMA-BUF) rendering path is off unless the user turned it on
+/// in Settings: NVIDIA + Wayland can produce a blank window with it. Must be
+/// decided before the first webview exists, so the config is read here too.
+fn apply_window_renderer_setting() {
+    if std::env::var_os("NERU_KEEP_WEBKIT_ENV").is_some() {
+        return;
+    }
+    let paths = neru_core::config::Paths::default_paths();
+    let gpu_window = neru_core::config::AppConfig::load(&paths.config_file).map(|c| c.app.gpu_window).unwrap_or(false);
+    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", if gpu_window { "0" } else { "1" });
+}
+
 pub fn run() {
     init_logging();
     let flags = parse_flags(std::env::args().skip(1));
+    apply_window_renderer_setting();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -152,12 +165,15 @@ pub fn run() {
             commands::autostart_set,
             commands::app_info,
             commands::metric_keys,
+            commands::metric_history,
             commands::theme_thumbnail,
             commands::rgb_status,
             commands::rgb_set_assignment,
             commands::rgb_apply_all,
             commands::rgb_clear_all,
             commands::rgb_refresh,
+            commands::rgb_set_zone_size,
+            commands::rgb_rescan_native,
             commands::rgb_rescan,
             commands::rgb_profile,
             commands::rgb_save_to_device,

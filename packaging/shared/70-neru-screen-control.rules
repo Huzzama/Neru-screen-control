@@ -1,4 +1,4 @@
-# Neru Screen Control — cooler LCD screens
+# Neru Screen Control — cooler LCD screens and RGB controllers
 # Install: sudo cp 70-neru-screen-control.rules /etc/udev/rules.d/
 #          sudo udevadm control --reload-rules && sudo udevadm trigger
 # Then unplug and replug the USB cable (or reboot).
@@ -7,5 +7,66 @@
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="264a", ATTRS{idProduct}=="2348", MODE="0660", TAG+="uaccess"
 # Thermaltake LCD Panel Kit 6" (View 600 TG, 1110×540)
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="264a", ATTRS{idProduct}=="2347", MODE="0660", TAG+="uaccess"
-# Thermalright ChiZhu USBDISPLAY (Frozen Warframe class, 320×320)
+# Thermalright ChiZhu USBDISPLAY 320×320 (Frozen Warframe class)
 SUBSYSTEM=="usb", ATTRS{idVendor}=="87ad", ATTRS{idProduct}=="70db", MODE="0660", TAG+="uaccess"
+
+# RGB controllers driven natively by Neru
+# ASUS Aura USB motherboard
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="18f3", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="1939", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="19af", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="1aa6", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="1bed", MODE="0660", TAG+="uaccess"
+# Corsair Lighting Node Core
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="0c1a", MODE="0660", TAG+="uaccess"
+# Corsair Lighting Node Pro
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="0c0b", MODE="0660", TAG+="uaccess"
+# Corsair Commander Pro
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="0c10", MODE="0660", TAG+="uaccess"
+# Corsair LS100 Lighting Kit
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="0c1e", MODE="0660", TAG+="uaccess"
+# Corsair 1000D Obsidian
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1d00", MODE="0660", TAG+="uaccess"
+# Corsair SPEC-OMEGA RGB
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1d04", MODE="0660", TAG+="uaccess"
+# Corsair LT100
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="0c23", MODE="0660", TAG+="uaccess"
+# NZXT Hue 2
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2001", MODE="0660", TAG+="uaccess"
+# NZXT Hue 2 Ambient
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2002", MODE="0660", TAG+="uaccess"
+# NZXT Hue 2 Motherboard
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2005", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="200b", MODE="0660", TAG+="uaccess"
+# NZXT Smart Device V2
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2006", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="200d", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="200f", MODE="0660", TAG+="uaccess"
+# NZXT Kraken X3 Series
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2007", MODE="0660", TAG+="uaccess"
+# NZXT Kraken X3 Series RGB
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2014", MODE="0660", TAG+="uaccess"
+# NZXT Kraken 2024 Elite Series RGB
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="3012", MODE="0660", TAG+="uaccess"
+# NZXT RGB & Fan Controller
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2009", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2010", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="200e", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2011", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2019", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2020", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="201f", MODE="0660", TAG+="uaccess"
+# NZXT RGB & Fan Controller 2024
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2022", MODE="0660", TAG+="uaccess"
+# NZXT B650E Motherboard
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="201b", MODE="0660", TAG+="uaccess"
+# NZXT RGB Controller
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2012", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e71", ATTRS{idProduct}=="2021", MODE="0660", TAG+="uaccess"
+# ASRock Polychrome USB
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="26ce", ATTRS{idProduct}=="01a2", MODE="0660", TAG+="uaccess"
+# ASRock DeskMini Addressable LED Strip
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="26ce", ATTRS{idProduct}=="01a6", MODE="0660", TAG+="uaccess"
+
+# I2C adapters: GPU and memory RGB controllers (needs the i2c-dev module)
+SUBSYSTEM=="i2c-dev", TAG+="uaccess"

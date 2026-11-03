@@ -131,6 +131,7 @@ impl AppState {
             fahrenheit: config.metrics.fahrenheit,
             metrics_interval: Duration::from_millis(config.metrics.interval_ms.clamp(250, 10_000)),
             media_dir: Some(paths.media_dir.clone()),
+            hwaccel: config.app.video_hwaccel,
             ..Default::default()
         }
     }
@@ -161,7 +162,7 @@ impl AppState {
             Ok(c) => c.rgb.clone(),
             Err(_) => return,
         };
-        if !cfg.enabled || !cfg.start_server || self.started.elapsed() < Duration::from_secs(6) {
+        if !cfg.enabled || !cfg.use_openrgb || !cfg.start_server || self.started.elapsed() < Duration::from_secs(6) {
             return;
         }
         let st = self.rgb_status();
@@ -219,6 +220,9 @@ impl AppState {
         }
         if new.metrics.fahrenheit != old.metrics.fahrenheit {
             self.send(Command::SetFahrenheit(new.metrics.fahrenheit));
+        }
+        if new.app.video_hwaccel != old.app.video_hwaccel {
+            self.send(Command::SetHwAccel(new.app.video_hwaccel));
         }
         if new.screen.model != old.screen.model {
             self.send(Command::SetModel(new.screen.model.clone()));

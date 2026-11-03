@@ -1,12 +1,17 @@
-//! RGB lighting through OpenRGB.
+//! RGB lighting.
 //!
-//! OpenRGB does the hardware work (motherboard ARGB headers, RAM, GPU, …);
-//! Neru connects to its SDK server, lists devices and zones, and either picks a
-//! device-native mode or drives the LEDs itself with software effects (static,
-//! breathing, rainbow, colour cycle, temperature-reactive).
+//! Two sources of devices, shown and driven the same way:
+//!
+//! * **native** drivers in [`native`] (Neru talks to the hardware itself);
+//! * **OpenRGB** (optional) through its SDK server, for everything Neru has no
+//!   driver for yet. A device handled natively is hidden from the OpenRGB list.
+//!
+//! Each device either runs a hardware mode or is driven per LED by software
+//! effects (static, breathing, rainbow, colour cycle, temperature-reactive).
 
 pub mod client;
 pub mod effects;
+pub mod native;
 pub mod protocol;
 
 use std::collections::{HashMap, HashSet};
@@ -34,8 +39,12 @@ pub struct RgbConfig {
     /// 0–100, applied to software effects.
     pub brightness: u8,
     pub assignments: Vec<Assignment>,
+    /// Also use OpenRGB for devices Neru has no driver for.
+    pub use_openrgb: bool,
     /// Launch `openrgb --server` when no server answers.
     pub start_server: bool,
+    /// LED counts of resizable zones (ARGB headers): `"<controller key>#<zone>"` → LEDs.
+    pub zone_sizes: HashMap<String, u32>,
 }
 
 impl Default for RgbConfig {
@@ -46,8 +55,47 @@ impl Default for RgbConfig {
             fps: 20,
             brightness: 100,
             assignments: Vec::new(),
+            use_openrgb: true,
             start_server: true,
+            zone_sizes: HashMap::new(),
         }
+    }
+}
+
+impl RgbConfig {
+    /// Upgrade keys saved by older versions (they embedded `/dev/hidrawN`,
+    /// which changes between boots and made assignments and LED counts
+    /// "forget" themselves). Idempotent.
+    pub fn migrate(&mut self) -> bool {
+        let mut changed = false;
+        let mut seen: HashSet<(String, Option<u32>)> = HashSet::new();
+        let mut kept = Vec::with_capacity(self.assignments.len());
+        for mut a in std::mem::take(&mut self.assignments) {
+            let k = protocol::migrate_key(&a.controller);
+            if k != a.controller {
+                changed = true;
+                a.controller = k;
+            }
+            if seen.insert((a.controller.clone(), a.zone)) {
+                kept.push(a);
+            } else {
+                changed = true;
+            }
+        }
+        self.assignments = kept;
+        let mut sizes = HashMap::new();
+        for (k, v) in std::mem::take(&mut self.zone_sizes) {
+            let nk = match k.rsplit_once('#') {
+                Some((key, zone)) => format!("{}#{zone}", protocol::migrate_key(key)),
+                None => k.clone(),
+            };
+            if nk != k {
+                changed = true;
+            }
+            sizes.entry(nk).or_insert(v);
+        }
+        self.zone_sizes = sizes;
+        changed
     }
 }
 
@@ -60,6 +108,8 @@ pub enum RgbCommand {
     DeleteProfile(String),
     /// Persist the current mode of a controller to its flash (where supported).
     SaveToDevice(String),
+    /// Re-probe native devices.
+    RescanNative,
     Stop,
 }
 
@@ -68,6 +118,8 @@ pub struct ZoneInfo {
     pub index: u32,
     pub name: String,
     pub leds_count: u32,
+    pub leds_min: u32,
+    pub leds_max: u32,
     pub start_idx: u32,
     pub matrix: Option<(u32, u32)>,
     pub segments: Vec<String>,
@@ -94,12 +146,18 @@ pub struct ControllerInfo {
     pub leds: usize,
     /// Whether a software effect currently drives this device.
     pub software: bool,
+    /// Driven by Neru itself (not through OpenRGB).
+    pub native: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RgbStatus {
     pub enabled: bool,
+    /// Connected to an OpenRGB server.
     pub connected: bool,
+    pub use_openrgb: bool,
+    pub native_devices: usize,
+    pub native_errors: Vec<String>,
     pub server: String,
     pub protocol: u32,
     pub error: Option<String>,
@@ -154,16 +212,17 @@ struct Worker {
     metrics: Arc<RwLock<Snapshot>>,
     status: Arc<Mutex<RgbStatus>>,
     rx: Receiver<RgbCommand>,
+    native: native::NativeHub,
     client: Option<OpenRgbClient>,
+    /// Native devices first, then OpenRGB ones (minus duplicates).
     controllers: Vec<Controller>,
+    orgb_controllers: Vec<Controller>,
     last_connect: Option<Instant>,
     last_poll: Instant,
     last_preview: Instant,
-    /// Controllers already switched to their custom (per-LED) mode.
+    last_keepalive: Instant,
     custom_mode: HashSet<String>,
-    /// Hardware modes already applied: controller key → effect.
     hw_applied: HashMap<String, Effect>,
-    /// Latest colours sent per (controller key, zone index) for previews.
     previews: HashMap<(String, u32), Vec<Color>>,
     smooth: HashMap<String, f32>,
     started: Instant,
@@ -180,11 +239,14 @@ impl Worker {
             metrics,
             status,
             rx,
+            native: native::NativeHub::default(),
             client: None,
             controllers: Vec::new(),
+            orgb_controllers: Vec::new(),
             last_connect: None,
             last_poll: now,
             last_preview: now,
+            last_keepalive: now,
             custom_mode: HashSet::new(),
             hw_applied: HashMap::new(),
             previews: HashMap::new(),
@@ -208,7 +270,6 @@ impl Worker {
         }
     }
 
-    /// Effect in force for a zone: zone-specific assignment, else the device-wide one.
     fn effect_for(&self, key: &str, zone: u32) -> Option<&Effect> {
         self.cfg
             .assignments
@@ -221,6 +282,15 @@ impl Worker {
     fn device_is_software(&self, c: &Controller) -> bool {
         let key = c.key();
         (0..c.zones.len() as u32).any(|z| self.effect_for(&key, z).map_or(false, Effect::is_software))
+    }
+
+    /// Rebuild the merged list from both sources.
+    fn merge(&mut self) {
+        let mut list = self.native.controllers();
+        let native_locs = self.native.locations();
+        list.extend(self.orgb_controllers.iter().filter(|c| !native_locs.contains(&c.location)).cloned());
+        Controller::assign_ordinals(&mut list);
+        self.controllers = list;
     }
 
     fn publish(&self) {
@@ -243,6 +313,7 @@ impl Worker {
                     modes: c.modes.clone(),
                     leds: c.leds.len(),
                     software: self.device_is_software(c),
+                    native: c.native,
                     zones: c
                         .zones
                         .iter()
@@ -261,6 +332,8 @@ impl Worker {
                                 index: zi as u32,
                                 name: z.name.clone(),
                                 leds_count: z.leds_count,
+                                leds_min: z.leds_min,
+                                leds_max: z.leds_max,
                                 start_idx: z.start_idx,
                                 matrix: z.matrix,
                                 segments: z.segments.iter().map(|s| s.name.clone()).collect(),
@@ -275,11 +348,23 @@ impl Worker {
         if let Ok(mut s) = self.status.lock() {
             s.enabled = self.cfg.enabled;
             s.connected = self.client.is_some();
+            s.use_openrgb = self.cfg.use_openrgb;
             s.server = self.cfg.server.clone();
             s.protocol = self.client.as_ref().map_or(0, |c| c.version);
+            s.native_devices = self.native.controllers().len();
+            s.native_errors = self.native.errors.clone();
             s.controllers = controllers;
             s.fps_actual = self.fps_actual;
         }
+    }
+
+    fn scan_native(&mut self) {
+        self.native.scan(&self.cfg.zone_sizes);
+        let native_keys: Vec<String> = self.controllers.iter().filter(|c| c.native).map(|c| c.key()).collect();
+        self.custom_mode.retain(|k| !native_keys.contains(k));
+        self.hw_applied.clear();
+        self.merge();
+        self.publish();
     }
 
     fn connect(&mut self) {
@@ -287,14 +372,14 @@ impl Worker {
         match OpenRgbClient::connect(&self.cfg.server) {
             Ok(c) => {
                 self.client = Some(c);
-                self.custom_mode.clear();
-                self.hw_applied.clear();
                 self.set_error(None);
                 self.reload();
             }
             Err(e) => {
                 debug!(error = %e, "OpenRGB connect failed");
-                self.set_error(Some(e.to_string()));
+                if self.native.is_empty() {
+                    self.set_error(Some(e.to_string()));
+                }
                 self.publish();
             }
         }
@@ -303,9 +388,9 @@ impl Worker {
     fn disconnect(&mut self, why: String) {
         warn!(%why, "OpenRGB connection dropped");
         self.client = None;
-        self.controllers.clear();
-        self.custom_mode.clear();
-        self.hw_applied.clear();
+        self.orgb_controllers.clear();
+        self.custom_mode.retain(|k| self.controllers.iter().any(|c| c.native && &c.key() == k));
+        self.merge();
         self.set_error(Some(why));
         self.publish();
     }
@@ -315,17 +400,86 @@ impl Worker {
         match client.controllers() {
             Ok(list) => {
                 info!(devices = list.len(), "OpenRGB device list loaded");
-                self.controllers = list;
+                self.orgb_controllers = list;
+                // Apply configured sizes to resizable OpenRGB zones.
+                let sizes: Vec<(u32, u32, u32)> = self
+                    .orgb_controllers
+                    .iter()
+                    .flat_map(|c| {
+                        let key = c.key();
+                        let sizes = &self.cfg.zone_sizes;
+                        c.zones.iter().enumerate().filter_map(move |(zi, z)| {
+                            let n = *sizes.get(&format!("{key}#{zi}"))?;
+                            (z.leds_max > z.leds_min && n != z.leds_count).then_some((c.index, zi as u32, n))
+                        })
+                    })
+                    .collect();
+                if !sizes.is_empty() {
+                    if let Some(c) = self.client.as_mut() {
+                        for (dev, zone, n) in &sizes {
+                            let _ = c.resize_zone(*dev, *zone, *n);
+                        }
+                        if let Ok(l) = c.controllers() {
+                            self.orgb_controllers = l;
+                        }
+                    }
+                }
                 let profiles = self.client.as_mut().and_then(|c| c.profiles().ok()).unwrap_or_default();
                 if let Ok(mut s) = self.status.lock() {
                     s.profiles = profiles;
                 }
-                // Modes may have been changed by someone else: re-apply ours.
                 self.custom_mode.clear();
                 self.hw_applied.clear();
+                self.merge();
                 self.publish();
             }
             Err(e) => self.disconnect(e.to_string()),
+        }
+    }
+
+    // ── per-device dispatch ─────────────────────────────────────────────────
+
+    fn fail(&mut self, c: &Controller, e: crate::Error) {
+        if c.native {
+            warn!(device = %c.name, error = %e, "native RGB device error");
+            self.set_error(Some(format!("{}: {e}", c.name)));
+            self.scan_native();
+        } else {
+            self.disconnect(e.to_string());
+        }
+    }
+
+    fn dev_direct(&mut self, c: &Controller) -> crate::Result<()> {
+        if c.native {
+            self.native.device(c.index).ok_or(crate::Error::NoDevice)?.set_direct()
+        } else {
+            self.client.as_mut().ok_or(crate::Error::NoDevice)?.set_custom_mode(c.index)
+        }
+    }
+
+    fn dev_zone(&mut self, c: &Controller, zone: u32, colors: &[Color]) -> crate::Result<()> {
+        if c.native {
+            self.native.device(c.index).ok_or(crate::Error::NoDevice)?.zone_leds(zone, colors)
+        } else {
+            self.client.as_mut().ok_or(crate::Error::NoDevice)?.update_zone_leds(c.index, zone, colors)
+        }
+    }
+
+    fn dev_mode(&mut self, c: &Controller, idx: usize, m: &Mode, save: bool) -> crate::Result<()> {
+        if c.native {
+            let d = self.native.device(c.index).ok_or(crate::Error::NoDevice)?;
+            if save {
+                d.save_mode(idx, m)
+            } else {
+                d.set_mode(idx, m)
+            }
+        } else {
+            let cl = self.client.as_mut().ok_or(crate::Error::NoDevice)?;
+            if save {
+                cl.save_mode(c.index, idx as u32, m)
+            } else {
+                cl.update_mode(c.index, idx as u32, m)
+            }
         }
     }
 
@@ -333,15 +487,23 @@ impl Worker {
         match cmd {
             RgbCommand::SetConfig(c) => {
                 let server_changed = c.server != self.cfg.server;
-                let was_enabled = self.cfg.enabled;
+                let sizes_changed = c.zone_sizes != self.cfg.zone_sizes;
+                let orgb_off = !c.use_openrgb || !c.enabled;
                 self.cfg = c;
-                if server_changed || (!self.cfg.enabled && was_enabled) {
+                if server_changed || orgb_off {
                     self.client = None;
-                    self.controllers.clear();
+                    self.orgb_controllers.clear();
                     self.last_connect = None;
                 }
-                // Assignments may have changed: hardware modes get re-applied.
+                if sizes_changed {
+                    self.native.apply_sizes(&self.cfg.zone_sizes);
+                    self.custom_mode.clear();
+                    if self.client.is_some() {
+                        self.reload();
+                    }
+                }
                 self.hw_applied.clear();
+                self.merge();
                 self.publish();
             }
             RgbCommand::Refresh => {
@@ -350,8 +512,12 @@ impl Worker {
                 } else {
                     self.last_connect = None;
                 }
+                self.merge();
+                self.publish();
             }
+            RgbCommand::RescanNative => self.scan_native(),
             RgbCommand::Rescan => {
+                self.scan_native();
                 if let Some(c) = self.client.as_mut() {
                     if let Err(e) = c.rescan() {
                         self.disconnect(e.to_string());
@@ -365,9 +531,6 @@ impl Worker {
                     match c.load_profile(&name) {
                         Ok(()) => {
                             self.set_message(format!("Profile {name} loaded"));
-                            // The profile changed device modes; drop our software state.
-                            self.custom_mode.clear();
-                            self.hw_applied.clear();
                             thread::sleep(Duration::from_millis(300));
                             self.reload();
                         }
@@ -399,11 +562,10 @@ impl Worker {
                 }
             }
             RgbCommand::SaveToDevice(key) => {
-                if let Some(ci) = self.controllers.iter().position(|c| c.key() == key) {
-                    let c = self.controllers[ci].clone();
+                if let Some(c) = self.controllers.iter().find(|c| c.key() == key).cloned() {
                     let idx = c.active_mode.max(0) as usize;
-                    if let (Some(client), Some(mode)) = (self.client.as_mut(), c.modes.get(idx)) {
-                        match client.save_mode(c.index, idx as u32, mode) {
+                    if let Some(mode) = c.modes.get(idx).cloned() {
+                        match self.dev_mode(&c, idx, &mode, true) {
                             Ok(()) => self.set_message(format!("{}: mode saved to device", c.name)),
                             Err(e) => self.set_error(Some(e.to_string())),
                         }
@@ -422,9 +584,8 @@ impl Worker {
         }
     }
 
-    /// Apply hardware modes that are assigned but not yet sent.
     fn apply_hardware(&mut self) {
-        let keys: Vec<(String, Effect, Controller)> = self
+        let todo: Vec<(String, Effect, Controller)> = self
             .controllers
             .iter()
             .filter(|c| !self.device_is_software(c))
@@ -437,8 +598,8 @@ impl Worker {
                 Some((key, eff.effect.clone(), c.clone()))
             })
             .collect();
-        for (key, effect, c) in keys {
-            let Effect::Hardware { mode, color, speed, brightness } = &effect else { continue };
+        for (key, effect, c) in todo {
+            let Effect::Hardware { mode, color, speed, brightness, direction } = &effect else { continue };
             let Some(mi) = c.modes.iter().position(|m| m.name.eq_ignore_ascii_case(mode)) else {
                 self.set_error(Some(format!("{}: no mode named {mode}", c.name)));
                 self.hw_applied.insert(key, effect.clone());
@@ -455,6 +616,11 @@ impl Worker {
                     m.brightness = (*b).clamp(m.brightness_min.min(m.brightness_max), m.brightness_max.max(m.brightness_min));
                 }
             }
+            if let Some(d) = direction {
+                if m.has(protocol::mode_flags::HAS_DIRECTION_LR) || m.has(protocol::mode_flags::HAS_DIRECTION_UD) || m.has(protocol::mode_flags::HAS_DIRECTION_HV) {
+                    m.direction = *d;
+                }
+            }
             let col = color.as_deref().and_then(Color::from_hex);
             if let Some(col) = col {
                 if m.has(protocol::mode_flags::HAS_MODE_SPECIFIC_COLOR) {
@@ -463,13 +629,16 @@ impl Worker {
                     m.color_mode = protocol::color_mode::MODE_SPECIFIC;
                 }
             }
-            let Some(client) = self.client.as_mut() else { return };
-            let res = client.update_mode(c.index, mi as u32, &m).and_then(|_| {
-                if col.is_some() && m.has(protocol::mode_flags::HAS_PER_LED_COLOR) {
-                    client.update_leds(c.index, &vec![col.unwrap(); c.leds.len()])
-                } else {
-                    Ok(())
+            let res = self.dev_mode(&c, mi, &m, false).and_then(|_| {
+                if let (Some(col), true) = (col, m.has(protocol::mode_flags::HAS_PER_LED_COLOR)) {
+                    for zi in 0..c.zones.len() as u32 {
+                        let n = c.zones[zi as usize].leds_count as usize;
+                        if n > 0 {
+                            self.dev_zone(&c, zi, &vec![col; n])?;
+                        }
+                    }
                 }
+                Ok(())
             });
             match res {
                 Ok(()) => {
@@ -482,14 +651,13 @@ impl Worker {
                     self.hw_applied.insert(key, effect.clone());
                 }
                 Err(e) => {
-                    self.disconnect(e.to_string());
+                    self.fail(&c, e);
                     return;
                 }
             }
         }
     }
 
-    /// One frame of software effects.
     fn frame(&mut self) {
         let t = self.started.elapsed().as_secs_f32();
         let snapshot = self.metrics.read().map(|s| s.clone()).unwrap_or_default();
@@ -512,9 +680,8 @@ impl Worker {
         for (c, zones) in plan {
             let key = c.key();
             if !self.custom_mode.contains(&key) {
-                let Some(client) = self.client.as_mut() else { return };
-                if let Err(e) = client.set_custom_mode(c.index) {
-                    self.disconnect(e.to_string());
+                if let Err(e) = self.dev_direct(&c) {
+                    self.fail(&c, e);
                     return;
                 }
                 self.custom_mode.insert(key.clone());
@@ -526,20 +693,16 @@ impl Worker {
                     continue;
                 }
                 let metric = match &effect {
-                    Effect::Temperature { metric, .. } => {
-                        let raw = snapshot.get(metric);
-                        raw.map(|v| {
-                            let e = self.smooth.entry(metric.clone()).or_insert(v);
-                            *e = *e * 0.7 + v * 0.3;
-                            *e
-                        })
-                    }
+                    Effect::Temperature { metric, .. } => snapshot.get(metric).map(|v| {
+                        let e = self.smooth.entry(metric.clone()).or_insert(v);
+                        *e = *e * 0.7 + v * 0.3;
+                        *e
+                    }),
                     _ => None,
                 };
                 let colors: Vec<Color> = effects::render(&effect, t, n, metric).into_iter().map(|c| c.scale(brightness)).collect();
-                let Some(client) = self.client.as_mut() else { return };
-                if let Err(e) = client.update_zone_leds(c.index, zi, &colors) {
-                    self.disconnect(e.to_string());
+                if let Err(e) = self.dev_zone(&c, zi, &colors) {
+                    self.fail(&c, e);
                     return;
                 }
                 sent_any = true;
@@ -554,6 +717,9 @@ impl Worker {
 
     fn run(mut self) {
         info!("rgb engine started");
+        if self.cfg.enabled {
+            self.scan_native();
+        }
         self.publish();
         loop {
             loop {
@@ -569,42 +735,38 @@ impl Worker {
             }
 
             if !self.cfg.enabled {
-                if self.client.is_some() {
-                    self.client = None;
-                    self.controllers.clear();
-                    self.publish();
-                }
                 thread::sleep(Duration::from_millis(200));
                 continue;
             }
 
-            if self.client.is_none() {
-                if self.last_connect.map_or(true, |t| t.elapsed() > Duration::from_secs(3)) {
-                    self.connect();
-                }
-                thread::sleep(Duration::from_millis(100));
-                continue;
-            }
-
-            // Device list notifications from the server.
-            if self.last_poll.elapsed() > Duration::from_secs(1) {
-                self.last_poll = Instant::now();
-                let dirty = match self.client.as_mut().map(|c| c.poll_notifications().map(|_| c.take_list_dirty())) {
-                    Some(Ok(d)) => d,
-                    Some(Err(e)) => {
-                        self.disconnect(e.to_string());
-                        continue;
+            if self.cfg.use_openrgb {
+                if self.client.is_none() {
+                    if self.last_connect.map_or(true, |t| t.elapsed() > Duration::from_secs(3)) {
+                        self.connect();
                     }
-                    None => false,
-                };
-                if dirty {
-                    self.reload();
+                } else if self.last_poll.elapsed() > Duration::from_secs(1) {
+                    self.last_poll = Instant::now();
+                    let dirty = match self.client.as_mut().map(|c| c.poll_notifications().map(|_| c.take_list_dirty())) {
+                        Some(Ok(d)) => d,
+                        Some(Err(e)) => {
+                            self.disconnect(e.to_string());
+                            false
+                        }
+                        None => false,
+                    };
+                    if dirty {
+                        self.reload();
+                    }
                 }
             }
 
             self.apply_hardware();
             let t0 = Instant::now();
             self.frame();
+            if self.last_keepalive.elapsed() >= Duration::from_secs(1) {
+                self.last_keepalive = Instant::now();
+                self.native.keepalive();
+            }
 
             if self.last_preview.elapsed() > Duration::from_millis(500) {
                 self.last_preview = Instant::now();

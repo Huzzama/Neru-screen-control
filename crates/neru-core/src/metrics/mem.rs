@@ -12,11 +12,15 @@ pub fn read() -> MemMetrics {
 fn parse(s: &str) -> MemMetrics {
     let mut total_kb = 0f32;
     let mut avail_kb = 0f32;
+    let mut swap_total_kb = 0f32;
+    let mut swap_free_kb = 0f32;
     for line in s.lines() {
         let mut it = line.split_whitespace();
         match (it.next(), it.next()) {
             (Some("MemTotal:"), Some(v)) => total_kb = v.parse().unwrap_or(0.0),
             (Some("MemAvailable:"), Some(v)) => avail_kb = v.parse().unwrap_or(0.0),
+            (Some("SwapTotal:"), Some(v)) => swap_total_kb = v.parse().unwrap_or(0.0),
+            (Some("SwapFree:"), Some(v)) => swap_free_kb = v.parse().unwrap_or(0.0),
             _ => {}
         }
     }
@@ -26,6 +30,9 @@ fn parse(s: &str) -> MemMetrics {
         used_mb,
         total_mb,
         pct: if total_mb > 0.0 { used_mb / total_mb * 100.0 } else { 0.0 },
+        avail_mb: avail_kb / 1024.0,
+        swap_used_mb: (swap_total_kb - swap_free_kb).max(0.0) / 1024.0,
+        swap_total_mb: swap_total_kb / 1024.0,
     }
 }
 
@@ -35,9 +42,11 @@ mod tests {
 
     #[test]
     fn parses_meminfo() {
-        let m = parse("MemTotal:       32768000 kB\nMemFree:        1000 kB\nMemAvailable:   16384000 kB\n");
+        let m = parse("MemTotal:       32768000 kB\nMemFree:        1000 kB\nMemAvailable:   16384000 kB\nSwapTotal:   2048 kB\nSwapFree:   1024 kB\n");
         assert!((m.total_mb - 32000.0).abs() < 0.01);
         assert!((m.used_mb - 16000.0).abs() < 0.01);
         assert!((m.pct - 50.0).abs() < 0.01);
+        assert!((m.swap_used_mb - 1.0).abs() < 0.01);
+        assert!((m.swap_total_mb - 2.0).abs() < 0.01);
     }
 }

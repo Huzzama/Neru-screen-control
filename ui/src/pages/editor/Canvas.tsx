@@ -84,6 +84,7 @@ export function Canvas({ editor, frame, grid, snap }: { editor: Editor; frame: P
         const s = d.el;
         switch (el.type) {
           case "bar":
+          case "graph":
           case "rect":
           case "image":
             if (s.type === el.type) {

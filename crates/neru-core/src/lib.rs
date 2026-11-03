@@ -14,6 +14,7 @@ pub mod engine;
 pub mod error;
 pub mod fans;
 pub mod hidraw;
+pub mod i2c;
 pub mod metrics;
 pub mod render;
 pub mod rgb;

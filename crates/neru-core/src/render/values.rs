@@ -2,9 +2,12 @@
 
 use std::collections::HashMap;
 
-use crate::metrics::Snapshot;
+use crate::metrics::{is_temperature_key, Snapshot};
 
 use super::theme::Stop;
+
+/// Recent samples per metric, `(age in seconds, value)` oldest first.
+pub type Windows = HashMap<String, Vec<(f32, f32)>>;
 
 /// Everything a theme can read while rendering.
 pub struct Values<'a> {
@@ -13,13 +16,15 @@ pub struct Values<'a> {
     /// Smoothed values for bars/gauges (keyed by metric).
     pub smoothed: &'a HashMap<String, f32>,
     pub now: chrono::DateTime<chrono::Local>,
+    /// History windows for graph elements (already in display units).
+    pub windows: Option<&'a Windows>,
 }
 
 impl Values<'_> {
     /// Raw value for a metric key (temperatures converted if `fahrenheit`).
     pub fn get(&self, key: &str) -> Option<f32> {
         let v = self.snapshot.get(key)?;
-        Some(if self.fahrenheit && key.ends_with(".temp") { v * 9.0 / 5.0 + 32.0 } else { v })
+        Some(if self.fahrenheit && is_temperature_key(key) { c_to_f(v) } else { v })
     }
 
     /// Value for bars/gauges: smoothed when available.
@@ -27,10 +32,17 @@ impl Values<'_> {
         self.smoothed.get(key).copied().or_else(|| self.get(key))
     }
 
+    /// History of `key`, if the renderer collected one for this frame.
+    pub fn window(&self, key: &str) -> &[(f32, f32)] {
+        self.windows.and_then(|w| w.get(key)).map_or(&[], |v| v.as_slice())
+    }
+
     fn get_string(&self, key: &str) -> Option<String> {
         match key {
             "cpu.name" => Some(short_cpu_name(&self.snapshot.cpu.name)),
             "gpu.name" => self.snapshot.gpu.as_ref().map(|g| g.name.clone()),
+            "net.iface" => Some(self.snapshot.net.iface.clone()),
+            "uptime" | "sys.uptime_text" => Some(crate::metrics::sys::format_uptime(self.snapshot.sys.uptime_s.unwrap_or(0.0))),
             _ => None,
         }
     }
@@ -68,14 +80,50 @@ impl Values<'_> {
                 if let Some(s) = self.get_string(key) {
                     return s;
                 }
-                let decimals: usize = arg.and_then(|a| a.trim().parse().ok()).unwrap_or(0);
-                match self.get(key) {
-                    Some(v) => format!("{v:.decimals$}"),
-                    None => "--".into(),
-                }
+                let Some(v) = self.get(key) else { return "--".into() };
+                format_value(v, arg.map(str::trim).unwrap_or(""))
             }
         }
     }
+}
+
+pub fn c_to_f(c: f32) -> f32 {
+    c * 9.0 / 5.0 + 32.0
+}
+
+/// Format a value with a placeholder argument: a number of decimals (`1`),
+/// or a unit style — `speed` (bytes/s → KB/s, MB/s…), `bits` (bytes/s →
+/// kbps, Mbps…), `size` (MB → GB when large), `bytes` (bytes → KB/MB/GB),
+/// `uptime` (seconds → "3d 04:12"), `pct` (0–100 with a % sign).
+pub fn format_value(v: f32, arg: &str) -> String {
+    if let Ok(decimals) = arg.parse::<usize>() {
+        return format!("{v:.decimals$}");
+    }
+    let (style, decimals) = match arg.split_once('.') {
+        Some((s, d)) => (s, d.parse::<usize>().ok()),
+        None => (arg, None),
+    };
+    match style {
+        "speed" => scaled(v, 1024.0, &["B/s", "KB/s", "MB/s", "GB/s"], decimals),
+        "bits" => scaled(v * 8.0, 1000.0, &["bps", "kbps", "Mbps", "Gbps"], decimals),
+        "bytes" => scaled(v, 1024.0, &["B", "KB", "MB", "GB", "TB"], decimals),
+        "size" => scaled(v, 1024.0, &["MB", "GB", "TB"], decimals),
+        "uptime" => crate::metrics::sys::format_uptime(v),
+        "pct" => format!("{v:.0$}%", decimals.unwrap_or(0)),
+        _ => format!("{v:.0}"),
+    }
+}
+
+/// Pick the largest unit that keeps the number below `base`.
+fn scaled(v: f32, base: f32, units: &[&str], decimals: Option<usize>) -> String {
+    let mut x = v.max(0.0);
+    let mut i = 0;
+    while x >= base && i + 1 < units.len() {
+        x /= base;
+        i += 1;
+    }
+    let d = decimals.unwrap_or(if i == 0 { 0 } else if x < 10.0 { 2 } else if x < 100.0 { 1 } else { 0 });
+    format!("{x:.d$} {}", units[i])
 }
 
 /// "AMD Ryzen 7 7800X3D 8-Core Processor" → "Ryzen 7 7800X3D".
@@ -104,12 +152,12 @@ pub fn short_cpu_name(full: &str) -> String {
 /// Exponential smoothing of every numeric metric, `factor` in 0..1 (0 = none).
 pub fn smooth_into(target: &mut HashMap<String, f32>, snapshot: &Snapshot, fahrenheit: bool, factor: f32) {
     let factor = factor.clamp(0.0, 0.95);
-    for (key, _, _) in Snapshot::KEYS {
-        let Some(mut v) = snapshot.get(key) else { continue };
-        if fahrenheit && key.ends_with(".temp") {
-            v = v * 9.0 / 5.0 + 32.0;
+    for (key, _, _) in snapshot.keys() {
+        let Some(mut v) = snapshot.get(&key) else { continue };
+        if fahrenheit && is_temperature_key(&key) {
+            v = c_to_f(v);
         }
-        let e = target.entry((*key).to_string()).or_insert(v);
+        let e = target.entry(key).or_insert(v);
         *e = *e * factor + v * (1.0 - factor);
     }
 }
@@ -184,14 +232,25 @@ mod tests {
     fn substitutes_placeholders() {
         let s = snap();
         let smoothed = HashMap::new();
-        let v = Values { snapshot: &s, fahrenheit: false, smoothed: &smoothed, now: chrono::Local::now() };
+        let v = Values { snapshot: &s, fahrenheit: false, smoothed: &smoothed, now: chrono::Local::now(), windows: None };
         assert_eq!(v.substitute("CPU {cpu.temp}° / {cpu.temp:1}° {cpu.usage:0}%"), "CPU 61° / 61.3° 12%");
         assert_eq!(v.substitute("{gpu.temp}"), "--");
         assert_eq!(v.substitute("{cpu.name} | {gpu.name}"), "Ryzen 7 7800X3D | Radeon RX 7800 XT");
         assert_eq!(v.substitute("plain {unclosed"), "plain {unclosed");
         assert!(!v.substitute("{time:%H:%M}").contains('{'));
-        let vf = Values { snapshot: &s, fahrenheit: true, smoothed: &smoothed, now: chrono::Local::now() };
+        let vf = Values { snapshot: &s, fahrenheit: true, smoothed: &smoothed, now: chrono::Local::now(), windows: None };
         assert_eq!(vf.substitute("{cpu.temp:0}"), "142");
+        let mut s2 = s.clone();
+        s2.net.down_bps = Some(12.6 * 1048576.0);
+        s2.net.up_bps = Some(2_000_000.0);
+        s2.sys.uptime_s = Some(90061.0);
+        let v2 = Values { snapshot: &s2, fahrenheit: false, smoothed: &smoothed, now: chrono::Local::now(), windows: None };
+        assert_eq!(v2.substitute("{net.down:speed}"), "12.6 MB/s");
+        assert_eq!(v2.substitute("{net.down:speed.0}"), "13 MB/s");
+        assert_eq!(v2.substitute("{net.up:bits}"), "16.0 Mbps");
+        assert_eq!(v2.substitute("{uptime}"), "1d 01:01");
+        assert_eq!(v2.substitute("{sys.uptime:uptime}"), "1d 01:01");
+        assert_eq!(v2.substitute("{cpu.usage:pct}"), "12%");
     }
 
     #[test]

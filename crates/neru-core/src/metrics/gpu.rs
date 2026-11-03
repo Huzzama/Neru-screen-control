@@ -66,6 +66,7 @@ struct AmdGpu {
     device: PathBuf,
     hwmon: Option<PathBuf>,
     temp: Option<PathBuf>,
+    hotspot: Option<PathBuf>,
     name: String,
 }
 
@@ -106,10 +107,16 @@ impl AmdGpu {
         let temp = hwmon_dir
             .as_deref()
             .and_then(|h| hwmon::find_temp(h, &["edge", "junction"]));
+        let hotspot = hwmon_dir.as_deref().and_then(|h| {
+            hwmon::inputs(h, "temp")
+                .into_iter()
+                .find(|(_, l)| l.as_deref().map_or(false, |l| l.eq_ignore_ascii_case("junction")))
+                .map(|(p, _)| p)
+        });
         let name = hwmon::read_trimmed(&device.join("product_name"))
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "AMD Radeon".into());
-        Self { device, hwmon: hwmon_dir, temp, name }
+        Self { device, hwmon: hwmon_dir, temp, hotspot, name }
     }
 
     fn read(&self) -> GpuMetrics {
@@ -119,16 +126,27 @@ impl AmdGpu {
                 .or_else(|| hwmon::read_i64(&h.join("power1_input")))
                 .map(|uw| uw as f32 / 1e6)
         });
+        let (fan_pct, fan_rpm) = match self.hwmon.as_deref() {
+            Some(h) => {
+                let pwm = hwmon::read_i64(&h.join("pwm1")).map(|v| v as f32 / 255.0 * 100.0);
+                let rpm = hwmon::read_i64(&h.join("fan1_input")).map(|v| v as f32);
+                (pwm, rpm)
+            }
+            None => (None, None),
+        };
         GpuMetrics {
             vendor: Some(GpuVendor::Amd),
             name: self.name.clone(),
             temp_c: self.temp.as_deref().and_then(hwmon::read_temp_c),
+            hotspot_c: self.hotspot.as_deref().and_then(hwmon::read_temp_c),
             usage_pct: hwmon::read_i64(&d.join("gpu_busy_percent")).map(|v| v as f32),
             core_mhz: current_dpm_mhz(&d.join("pp_dpm_sclk")),
             mem_mhz: current_dpm_mhz(&d.join("pp_dpm_mclk")),
             power_w,
             vram_used_mb: hwmon::read_i64(&d.join("mem_info_vram_used")).map(|b| b as f32 / 1048576.0),
             vram_total_mb: hwmon::read_i64(&d.join("mem_info_vram_total")).map(|b| b as f32 / 1048576.0),
+            fan_pct,
+            fan_rpm,
         }
     }
 }
@@ -178,6 +196,7 @@ impl NvidiaGpu {
         m.core_mhz = dev.clock_info(Clock::Graphics).ok().map(|c| c as f32);
         m.mem_mhz = dev.clock_info(Clock::Memory).ok().map(|c| c as f32);
         m.power_w = dev.power_usage().ok().map(|mw| mw as f32 / 1000.0);
+        m.fan_pct = dev.fan_speed(0).ok().map(|p| p as f32);
         if let Ok(mem) = dev.memory_info() {
             m.vram_used_mb = Some(mem.used as f32 / 1048576.0);
             m.vram_total_mb = Some(mem.total as f32 / 1048576.0);

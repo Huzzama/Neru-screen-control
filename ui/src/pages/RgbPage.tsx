@@ -15,14 +15,30 @@ const KIND_ICON: Record<string, typeof Cpu> = {
   storage: HardDrive,
 };
 
-type SoftKind = "off" | "static" | "breathing" | "rainbow" | "color_cycle" | "temperature";
+type SoftKind = "off" | "static" | "breathing" | "gradient" | "rainbow" | "color_cycle" | "wave" | "chase" | "twinkle" | "candle" | "strobe" | "temperature";
 const SOFT_KINDS: { value: SoftKind | "hardware"; label: string }[] = [
   { value: "static", label: "Static colour" },
+  { value: "gradient", label: "Gradient (multi-colour)" },
   { value: "breathing", label: "Breathing" },
   { value: "rainbow", label: "Rainbow" },
   { value: "color_cycle", label: "Colour cycle" },
+  { value: "wave", label: "Wave (pulse)" },
+  { value: "chase", label: "Chase (running lights)" },
+  { value: "twinkle", label: "Twinkle (sparkles)" },
+  { value: "candle", label: "Candle / fire" },
+  { value: "strobe", label: "Strobe" },
   { value: "temperature", label: "Temperature (reactive)" },
   { value: "off", label: "Off" },
+];
+
+const METRIC_OPTIONS = [
+  { value: "cpu.temp", label: "CPU temperature" },
+  { value: "gpu.temp", label: "GPU temperature" },
+  { value: "cpu.usage", label: "CPU load (%)" },
+  { value: "gpu.usage", label: "GPU load (%)" },
+  { value: "mem.pct", label: "RAM used (%)" },
+  { value: "disk.temp", label: "Drive temperature" },
+  { value: "net.down_mbps", label: "Download (Mbps)" },
 ];
 
 function defaultEffect(kind: string, modes?: RgbMode[]): Effect {
@@ -37,8 +53,20 @@ function defaultEffect(kind: string, modes?: RgbMode[]): Effect {
       return { kind: "color_cycle", colors: ["#ffc20e", "#9b30ff", "#3dd6ff"], period_s: 6 };
     case "temperature":
       return { kind: "temperature", metric: "cpu.temp", ramp: [{ at: 35, color: "#3dd6ff" }, { at: 65, color: "#ffc20e" }, { at: 85, color: "#ff3b5c" }] };
+    case "gradient":
+      return { kind: "gradient", colors: ["#ffc20e", "#ff3b5c", "#9b30ff"], speed: 0, repeat: 1 };
+    case "wave":
+      return { kind: "wave", color: "#3dd6ff", background: "#0a0a2a", period_s: 3, width: 0.3, bounce: false };
+    case "chase":
+      return { kind: "chase", color: "#ffc20e", background: "#000000", period_s: 2, count: 3, width: 2 };
+    case "twinkle":
+      return { kind: "twinkle", color: "#ffffff", background: "#120a2a", density: 0.3, period_s: 2 };
+    case "strobe":
+      return { kind: "strobe", color: "#ffffff", hz: 4, duty: 0.3 };
+    case "candle":
+      return { kind: "candle", color: "#ff7a00", intensity: 0.7 };
     case "hardware":
-      return { kind: "hardware", mode: modes?.[0]?.name ?? "Static", color: "#ffc20e", speed: null, brightness: null };
+      return { kind: "hardware", mode: modes?.[0]?.name ?? "Static", color: "#ffc20e", speed: null, brightness: null, direction: null };
     default:
       return { kind: "static", color: "#ffc20e" };
   }
@@ -90,18 +118,111 @@ function EffectEditor({ value, onChange, modes }: { value: Effect; onChange: (e:
           </div>
         </>
       )}
+      {value.kind === "gradient" && (
+        <>
+          <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+            {value.colors.map((c, i) => (
+              <div key={i} className="row" style={{ gap: 2 }}>
+                <ColorInput value={c} onChange={(nc) => onChange({ ...value, colors: value.colors.map((x, j) => (j === i ? nc : x)) })} />
+                {value.colors.length > 1 && (
+                  <button className="btn ghost icon sm" aria-label="Remove colour" onClick={() => onChange({ ...value, colors: value.colors.filter((_, j) => j !== i) })}>
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button className="btn sm" onClick={() => onChange({ ...value, colors: [...value.colors, "#3dd6ff"] })}>
+              Add colour
+            </button>
+          </div>
+          <div className="fields-2">
+            <Field label="Scroll (cycles/min, 0 = still)">
+              <NumberInput value={value.speed} min={0} step={1} onChange={(speed) => onChange({ ...value, speed })} />
+            </Field>
+            <Field label="Repeats across the zone">
+              <NumberInput value={value.repeat} min={0.1} step={0.5} onChange={(repeat) => onChange({ ...value, repeat })} />
+            </Field>
+          </div>
+        </>
+      )}
+      {value.kind === "wave" && (
+        <>
+          <div className="fields-2">
+            <Field label="Pulse">
+              <ColorInput value={value.color} onChange={(color) => onChange({ ...value, color })} />
+            </Field>
+            <Field label="Background">
+              <ColorInput value={value.background} onChange={(background) => onChange({ ...value, background })} />
+            </Field>
+            <Field label="Period (s)">
+              <NumberInput value={value.period_s} min={0.5} step={0.5} onChange={(period_s) => onChange({ ...value, period_s })} />
+            </Field>
+            <Field label="Width (0–1)">
+              <NumberInput value={value.width} min={0.05} max={1} step={0.05} onChange={(width) => onChange({ ...value, width })} />
+            </Field>
+          </div>
+          <label className="row small" style={{ gap: 8 }}>
+            <input type="checkbox" checked={value.bounce} onChange={(e) => onChange({ ...value, bounce: e.target.checked })} /> Bounce back and forth
+          </label>
+        </>
+      )}
+      {value.kind === "chase" && (
+        <div className="fields-2">
+          <Field label="Lit">
+            <ColorInput value={value.color} onChange={(color) => onChange({ ...value, color })} />
+          </Field>
+          <Field label="Background">
+            <ColorInput value={value.background} onChange={(background) => onChange({ ...value, background })} />
+          </Field>
+          <Field label="Period (s)">
+            <NumberInput value={value.period_s} min={0.3} step={0.5} onChange={(period_s) => onChange({ ...value, period_s })} />
+          </Field>
+          <Field label="Runs">
+            <NumberInput value={value.count} min={1} max={32} onChange={(count) => onChange({ ...value, count: Math.round(count) })} />
+          </Field>
+          <Field label="LEDs per run">
+            <NumberInput value={value.width} min={1} max={64} onChange={(width) => onChange({ ...value, width: Math.round(width) })} />
+          </Field>
+        </div>
+      )}
+      {value.kind === "twinkle" && (
+        <div className="fields-2">
+          <Field label="Sparkle">
+            <ColorInput value={value.color} onChange={(color) => onChange({ ...value, color })} />
+          </Field>
+          <Field label="Background">
+            <ColorInput value={value.background} onChange={(background) => onChange({ ...value, background })} />
+          </Field>
+          <Field label="Density (0–1)">
+            <NumberInput value={value.density} min={0} max={1} step={0.05} onChange={(density) => onChange({ ...value, density })} />
+          </Field>
+          <Field label="Period (s)">
+            <NumberInput value={value.period_s} min={0.3} step={0.5} onChange={(period_s) => onChange({ ...value, period_s })} />
+          </Field>
+        </div>
+      )}
+      {value.kind === "strobe" && (
+        <div className="fields-3">
+          <ColorInput value={value.color} onChange={(color) => onChange({ ...value, color })} />
+          <Field label="Flashes / s">
+            <NumberInput value={value.hz} min={0.2} max={30} step={0.5} onChange={(hz) => onChange({ ...value, hz })} />
+          </Field>
+          <Field label="On fraction">
+            <NumberInput value={value.duty} min={0.05} max={0.95} step={0.05} onChange={(duty) => onChange({ ...value, duty })} />
+          </Field>
+        </div>
+      )}
+      {value.kind === "candle" && (
+        <div className="fields-2">
+          <ColorInput value={value.color} onChange={(color) => onChange({ ...value, color })} />
+          <Field label="Flicker (0–1)">
+            <NumberInput value={value.intensity} min={0} max={1} step={0.1} onChange={(intensity) => onChange({ ...value, intensity })} />
+          </Field>
+        </div>
+      )}
       {value.kind === "temperature" && (
         <>
-          <Select
-            value={value.metric}
-            options={[
-              { value: "cpu.temp", label: "CPU temperature" },
-              { value: "gpu.temp", label: "GPU temperature" },
-              { value: "cpu.usage", label: "CPU load (%)" },
-              { value: "gpu.usage", label: "GPU load (%)" },
-            ]}
-            onChange={(metric) => onChange({ ...value, metric })}
-          />
+          <Select value={value.metric} options={METRIC_OPTIONS} onChange={(metric) => onChange({ ...value, metric })} />
           {value.ramp.map((s, i) => (
             <div key={i} className="ramp-stop">
               <NumberInput value={s.at} onChange={(at) => onChange({ ...value, ramp: value.ramp.map((x, j) => (j === i ? { ...x, at } : x)) })} />
@@ -131,6 +252,15 @@ function EffectEditor({ value, onChange, modes }: { value: Effect; onChange: (e:
                 <NumberInput value={value.brightness ?? mode.brightness} min={Math.min(mode.brightness_min, mode.brightness_max)} max={Math.max(mode.brightness_min, mode.brightness_max)} onChange={(brightness) => onChange({ ...value, brightness: Math.round(brightness) })} />
               </Field>
             ) : null}
+            {mode && mode.flags & ((1 << 1) | (1 << 2) | (1 << 3)) ? (
+              <Field label="Direction">
+                <Select
+                  value={String(value.direction ?? mode.direction ?? 0)}
+                  options={mode.flags & (1 << 2) ? [{ value: "2", label: "Up" }, { value: "3", label: "Down" }] : mode.flags & (1 << 3) ? [{ value: "4", label: "Horizontal" }, { value: "5", label: "Vertical" }] : [{ value: "0", label: "Left" }, { value: "1", label: "Right" }]}
+                  onChange={(d) => onChange({ ...value, direction: Number(d) })}
+                />
+              </Field>
+            ) : null}
           </div>
           <span className="hint">Hardware modes keep running after Neru quits. Use “Save to device” to persist across reboots where supported.</span>
         </>
@@ -150,6 +280,27 @@ function Swatches({ colors }: { colors: string[] }) {
   );
 }
 
+/** LED count of a resizable zone (ARGB header): the board can't tell how many LEDs are plugged in. */
+function ZoneSize({ controller, zone }: { controller: RgbController; zone: RgbController["zones"][number] }) {
+  const toast = useToast();
+  const [n, setN] = useState(String(zone.leds_count));
+  useEffect(() => setN(String(zone.leds_count)), [zone.leds_count]);
+  const commit = () => {
+    const v = Math.max(zone.leds_min, Math.min(zone.leds_max, parseInt(n, 10) || 0));
+    if (v === zone.leds_count) return;
+    api.rgbSetZoneSize(controller.key, zone.index, v).then(() => toast.success(`${zone.name}: ${v} LEDs`)).catch((e) => toast.error(errText(e)));
+  };
+  return (
+    <div className="col" style={{ gap: 4, marginTop: 4 }}>
+      <div className="row" style={{ gap: 6 }}>
+        <input className="input mono" style={{ width: 70, padding: "3px 6px" }} type="number" min={zone.leds_min} max={zone.leds_max} value={n} onChange={(e) => setN(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === "Enter" && commit()} aria-label="LED count" />
+        <span className="hint">LEDs</span>
+      </div>
+      {zone.leds_count === 0 && <span className="hint" style={{ color: "var(--accent)" }}>Set how many LEDs are on this header (e.g. 3 fans × 8 = 24).</span>}
+    </div>
+  );
+}
+
 function ZoneRow({ controller, zone, onSet }: { controller: RgbController; zone: RgbController["zones"][number]; onSet: (zone: number | null, effect: Effect | null) => Promise<void> }) {
   const [draft, setDraft] = useState<Effect | null>(null);
   const current = zone.effect;
@@ -161,10 +312,14 @@ function ZoneRow({ controller, zone, onSet }: { controller: RgbController; zone:
           <div className="small" style={{ fontWeight: 600 }}>
             {zone.name}
           </div>
-          <div className="hint mono">
-            {zone.leds_count} LEDs{zone.matrix ? ` · ${zone.matrix[0]}×${zone.matrix[1]}` : ""}
-            {zone.segments.length ? ` · ${zone.segments.join(", ")}` : ""}
-          </div>
+          {zone.leds_max > zone.leds_min ? (
+            <ZoneSize controller={controller} zone={zone} />
+          ) : (
+            <div className="hint mono">
+              {zone.leds_count} LEDs{zone.matrix ? ` · ${zone.matrix[0]}×${zone.matrix[1]}` : ""}
+              {zone.segments.length ? ` · ${zone.segments.join(", ")}` : ""}
+            </div>
+          )}
           <div style={{ marginTop: 6 }}>
             <Swatches colors={zone.preview} />
           </div>
@@ -209,6 +364,7 @@ function DeviceCard({ c, onSet, onSaveToDevice }: { c: RgbController; onSet: (zo
           <Icon size={18} />
           {c.name}
           <span className="badge">{c.kind}</span>
+          {c.native ? <span className="badge green">native</span> : <span className="badge">OpenRGB</span>}
           {c.software ? <span className="badge accent">software</span> : activeMode ? <span className="badge violet">{activeMode}</span> : null}
         </div>
         <span className="hint mono">
@@ -288,10 +444,11 @@ export function RgbPage() {
         <div>
           <div className="eyebrow">// lighting</div>
           <h1 className="page-title">RGB</h1>
-          <p className="page-sub">Motherboard, fans, pump, RAM and GPU lighting through OpenRGB. Effects run in Neru; hardware modes run on the devices.</p>
+          <p className="page-sub">Motherboard, fans, pump, RAM and GPU lighting. Neru drives supported devices itself; anything else goes through OpenRGB if it is installed.</p>
         </div>
         <div className="row">
-          <span className={`badge ${status?.connected ? "green" : "red"}`}>{status?.connected ? `OpenRGB · ${devices.length} devices · v${status.protocol}` : "OpenRGB not connected"}</span>
+          <span className="badge green">{status?.native_devices ?? 0} native</span>
+          {status?.use_openrgb && <span className={`badge ${status?.connected ? "green" : ""}`}>{status?.connected ? `OpenRGB v${status.protocol}` : "OpenRGB off"}</span>}
           <button className="btn ghost icon" aria-label="Refresh" onClick={() => run(api.rgbRefresh())}>
             <RefreshCw size={16} />
           </button>
@@ -310,12 +467,21 @@ export function RgbPage() {
         </div>
       )}
 
-      {enabled && status && !status.connected && (
-        <div className="banner warn" style={{ alignItems: "flex-start" }}>
+      {status?.native_errors.map((e) => (
+        <div key={e} className="banner error small">
+          {e}
+          <button className="btn sm" onClick={() => run(api.rgbRescanNative(), "Rescanning…")}>
+            Retry
+          </button>
+        </div>
+      ))}
+
+      {enabled && status && status.use_openrgb && !status.connected && (
+        <div className={`banner ${devices.length ? "info" : "warn"}`} style={{ alignItems: "flex-start" }}>
           <Lightbulb size={18} style={{ flex: "none", marginTop: 2 }} />
           <div>
             <div>
-              <strong>No OpenRGB SDK server at {status.server}.</strong> Neru needs OpenRGB running with its server on (OpenRGB → Settings → “Start server”), or start a headless one here.
+              <strong>OpenRGB is not running.</strong> Optional: it adds devices Neru has no driver for yet. Start its server here, or turn it off in Settings → RGB.
             </div>
             {status.error && <div className="hint mono" style={{ marginTop: 4 }}>{status.error}</div>}
           </div>
@@ -325,9 +491,9 @@ export function RgbPage() {
         </div>
       )}
 
-      {status?.connected && devices.length === 0 && (
+      {devices.length === 0 && (status?.connected || !status?.use_openrgb) && (
         <div className="banner warn">
-          OpenRGB is connected but reports no devices. In OpenRGB itself: check the udev rules (motherboard / USB controllers), the <code>i2c-dev</code> module (RAM, GPU), and “Rescan devices”.
+          No RGB devices found. Install the device access rules (Settings → Device access), replug or reboot, then press rescan.
         </div>
       )}
 

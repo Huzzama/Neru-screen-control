@@ -14,7 +14,7 @@ fn snapshot() -> Snapshot {
     Snapshot {
         cpu: CpuMetrics { temp_c: Some(70.0), usage_pct: Some(50.0), freq_mhz: Some(4000.0), power_w: Some(60.0), ..Default::default() },
         gpu: Some(GpuMetrics { temp_c: Some(60.0), usage_pct: Some(80.0), vram_used_mb: Some(4000.0), vram_total_mb: Some(8000.0), ..Default::default() }),
-        mem: MemMetrics { used_mb: 8000.0, total_mb: 16000.0, pct: 50.0 },
+        mem: MemMetrics { used_mb: 8000.0, total_mb: 16000.0, pct: 50.0, ..Default::default() },
         ..Default::default()
     }
 }

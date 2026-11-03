@@ -33,3 +33,6 @@ config.json
 .DS_Store
 Thumbs.db
 src-tauri/binaries/
+
+# ── Files the Claude desktop app drops next to the project ───────────────────
+Claude outputs/
