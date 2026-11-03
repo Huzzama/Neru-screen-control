@@ -309,3 +309,9 @@ code, .mono { font-family: var(--font-mono); }
 .help-pre { font-family: var(--font-mono); font-size: var(--fs-xs); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; overflow: auto; color: var(--text-2); margin: 0 0 12px; }
 .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; text-underline-offset: 3px; }
 @media (max-width: 900px) { .help-layout { grid-template-columns: 1fr; } .help-nav { flex-direction: row; flex-wrap: wrap; position: static; } }
+
+/* ── Update check ──────────────────────────────────────────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }
+.update-pill { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding: 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); font-size: 12px; cursor: pointer; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); width: 100%; text-align: left; }
+.update-pill:hover { background: color-mix(in srgb, var(--accent) 28%, transparent); }

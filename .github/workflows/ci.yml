@@ -23,9 +23,11 @@ jobs:
       - run: npm ci
       - name: UI type-check and build
         run: npm --prefix ui run build
-      - name: Rust tests
-        run: cargo test --workspace --locked
+      # tauri-build checks that the external binaries exist, so they must be
+      # built before anything compiles src-tauri (cargo test builds the workspace).
       - name: Helper binaries build
         run: sh scripts/build-bins.sh debug
+      - name: Rust tests
+        run: cargo test --workspace --locked
       - name: App compiles
         run: cargo build --locked -p neru-screen-control

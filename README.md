@@ -39,7 +39,8 @@ tray icon, on any distro.
 * 🌀 **Fan curves** — any hwmon PWM channel from any temperature, applied by a
   small root helper that keeps working with the app closed.
 * ⚙ **Settings** — autostart on login, run in the tray, hardware video decoding
-  (NVIDIA / AMD / Intel), Fahrenheit, screen calibration.
+  (NVIDIA / AMD / Intel), Fahrenheit, screen calibration, **Check for updates**
+  (Settings → About; a newer release is also announced once in the sidebar).
 * ❓ **Built-in help** — a how-to page inside the app.
 * 🧰 **`neru` CLI** — everything the app does with hardware, scriptable.
 

@@ -1,8 +1,11 @@
-import { Fan, HelpCircle, LayoutDashboard, Lightbulb, MonitorSmartphone, Settings } from "lucide-react";
-import { useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { ArrowUpCircle, Fan, HelpCircle, LayoutDashboard, Lightbulb, MonitorSmartphone, Settings } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { ToastProvider } from "./components/ui";
+import { api } from "./lib/api";
 import { useStatus } from "./lib/hooks";
+import { checkForUpdate, type UpdateCheck } from "./lib/updates";
 import { Dashboard } from "./pages/Dashboard";
 import { FansPage } from "./pages/FansPage";
 import { HelpPage } from "./pages/HelpPage";
@@ -24,6 +27,23 @@ const NAV: { id: Page; label: string; icon: typeof LayoutDashboard; soon?: boole
 export default function App() {
   const [page, setPage] = useState<Page>("dashboard");
   const status = useStatus();
+  const [update, setUpdate] = useState<UpdateCheck | null>(null);
+
+  // One quiet check per start, well after the UI is up; failures are silent
+  // (Settings → About has the button with the real error).
+  useEffect(() => {
+    const ctl = new AbortController();
+    const t = window.setTimeout(() => {
+      api.appInfo()
+        .then((i) => checkForUpdate(i.version, ctl.signal))
+        .then((u) => u.available && setUpdate(u))
+        .catch(() => {});
+    }, 15_000);
+    return () => {
+      window.clearTimeout(t);
+      ctl.abort();
+    };
+  }, []);
 
   const pill = status.connected
     ? { cls: "on", title: status.screen?.name ?? "Screen", sub: `${status.fps_actual.toFixed(0)} fps · ${status.theme_name}` }
@@ -57,6 +77,11 @@ export default function App() {
                 <span className="dim">{pill.sub}</span>
               </div>
             </div>
+            {update && (
+              <button className="update-pill" title="Open the release page" onClick={() => openUrl(update.url).catch(() => setPage("settings"))}>
+                <ArrowUpCircle size={14} /> Neru {update.latest} is out
+              </button>
+            )}
           </div>
         </aside>
         <main className="main" id="main">

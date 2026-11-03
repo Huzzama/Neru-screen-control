@@ -139,6 +139,9 @@ pub struct NzxtHue2 {
     modes: Vec<Mode>,
     active_mode: usize,
     colors: Vec<Vec<Color>>,
+    /// Per channel: the colours in `colors` were sent as a direct frame (so an
+    /// identical frame can be skipped). Cleared by every mode change.
+    direct_sent: Vec<bool>,
 }
 
 impl NzxtHue2 {
@@ -211,6 +214,7 @@ impl NzxtHue2 {
             channels,
             effects_2023,
             colors: leds.iter().map(|&n| vec![Color::BLACK; n as usize]).collect(),
+            direct_sent: vec![false; leds.len()],
             leds,
             accessories,
             modes: modes(),
@@ -381,10 +385,16 @@ impl NativeDevice for NzxtHue2 {
         let n = leds.min(MAX_LEDS_PER_CHANNEL);
         self.leds[z] = n;
         self.colors[z].resize(n as usize, Color::BLACK);
+        self.direct_sent[z] = false;
         Ok(())
     }
 
     fn set_direct(&mut self) -> Result<()> {
+        if self.active_mode != 0 {
+            // Leaving a hardware effect: every channel must be sent again,
+            // even when its colours have not changed.
+            self.direct_sent.iter_mut().for_each(|d| *d = false);
+        }
         self.active_mode = 0;
         Ok(())
     }
@@ -400,13 +410,16 @@ impl NativeDevice for NzxtHue2 {
         }
         let mut new: Vec<Color> = colors.iter().copied().take(n).collect();
         new.resize(n, Color::BLACK);
-        if self.colors[z] == new && self.active_mode == 0 {
+        if self.colors[z] == new && self.active_mode == 0 && self.direct_sent[z] {
             return Ok(());
         }
         self.colors[z] = new;
         if self.active_mode == 0 {
-            self.send_direct(z)
+            self.send_direct(z)?;
+            self.direct_sent[z] = true;
+            Ok(())
         } else {
+            self.direct_sent[z] = false;
             let mut m = self.modes[self.active_mode].clone();
             if m.has(mode_flags::HAS_MODE_SPECIFIC_COLOR) {
                 m.colors = vec![self.colors[z][0]];
@@ -425,6 +438,7 @@ impl NativeDevice for NzxtHue2 {
         }
         let m = m.clone();
         self.active_mode = mode_idx;
+        self.direct_sent.iter_mut().for_each(|d| *d = false);
         for z in 0..self.channels as usize {
             if self.leds[z] == 0 {
                 continue;

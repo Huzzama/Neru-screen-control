@@ -144,6 +144,7 @@ export function HelpPage({ goTo }: { goTo: (p: Page) => void }) {
           <li><strong>Fahrenheit</strong>, <strong>sensor refresh</strong> — how often values are read (1 s is a good default).</li>
           <li><strong>Use this screen</strong> — pin one screen when two are connected.</li>
           <li><strong>Thermalright panel calibration</strong> — only for ChiZhu-based screens whose picture is shifted or mirrored.</li>
+          <li><strong>Check for updates</strong> (About) — asks GitHub for the newest release and offers the AppImage; Neru also checks once after it starts and shows a small “Neru x.y.z is out” pill in the sidebar. Nothing is downloaded on its own. AUR and .deb installs update through the package manager.</li>
         </ul>
       ),
     },

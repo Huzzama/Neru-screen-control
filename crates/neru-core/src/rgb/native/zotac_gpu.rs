@@ -263,6 +263,12 @@ pub struct ZotacGpu {
     modes: Vec<Mode>,
     active_mode: usize,
     colors: Vec<Color>,
+    /// The registers last handed to the writer, per zone (`None` = the card's
+    /// state is unknown, so the next request is always written). Deduping on
+    /// the whole register set — not just the colour — is what makes a mode
+    /// change with an unchanged colour (hardware Breathe → software Static)
+    /// reach the card.
+    sent: Vec<Option<ZoneRegs>>,
     tx: Sender<Job>,
     handle: Option<thread::JoinHandle<()>>,
     last_error: Arc<Mutex<Option<String>>>,
@@ -282,19 +288,35 @@ impl ZotacGpu {
             .name("neru-zotac-i2c".into())
             .spawn(move || writer(dev, rx, le))
             .map_err(Error::Io)?;
-        Ok(Self {
-            name: found.name.clone(),
+        Ok(Self::with_writer(found.name.clone(), version, location, found.zones.clone(), found.known, tx, Some(handle), last_error))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn with_writer(
+        name: String,
+        version: String,
+        location: String,
+        zone_names: Vec<String>,
+        known_layout: bool,
+        tx: Sender<Job>,
+        handle: Option<thread::JoinHandle<()>>,
+        last_error: Arc<Mutex<Option<String>>>,
+    ) -> Self {
+        let n = zone_names.len();
+        Self {
+            name,
             version,
             location,
-            zone_names: found.zones.clone(),
-            known_layout: found.known,
+            zone_names,
+            known_layout,
             modes: modes(),
             active_mode: 0,
-            colors: vec![Color::new(0xff, 0xc2, 0x0e); found.zones.len()],
+            colors: vec![Color::new(0xff, 0xc2, 0x0e); n],
+            sent: vec![None; n],
             tx,
-            handle: Some(handle),
+            handle,
             last_error,
-        })
+        }
     }
 
     fn regs_for(&self, zone: usize) -> ZoneRegs {
@@ -311,19 +333,24 @@ impl ZotacGpu {
     }
 
     /// Queue a zone write and, when `wait`, block for its result.
-    fn send_zone(&self, zone: usize, wait: bool) -> Result<()> {
+    fn send_zone(&mut self, zone: usize, wait: bool) -> Result<()> {
         let regs = self.regs_for(zone);
-        if wait {
+        self.sent[zone] = None;
+        let res = if wait {
             let (reply_tx, reply_rx) = channel();
             self.tx.send(Job::Write { zone: zone as u8, regs, reply: Some(reply_tx) }).map_err(|_| Error::Protocol("ZOTAC writer stopped".into()))?;
             reply_rx.recv_timeout(Duration::from_secs(3)).map_err(|_| Error::Timeout("ZOTAC GPU write".into()))?
         } else {
             self.tx.send(Job::Write { zone: zone as u8, regs, reply: None }).map_err(|_| Error::Protocol("ZOTAC writer stopped".into()))?;
             self.take_error()
+        };
+        if res.is_ok() {
+            self.sent[zone] = Some(regs);
         }
+        res
     }
 
-    fn send_all(&self, wait: bool) -> Result<()> {
+    fn send_all(&mut self, wait: bool) -> Result<()> {
         for z in 0..self.zone_names.len() {
             self.send_zone(z, wait)?;
         }
@@ -391,10 +418,10 @@ impl NativeDevice for ZotacGpu {
             return Err(Error::InvalidValue(format!("no zone {zone}")));
         }
         let Some(c) = colors.first() else { return Ok(()) };
-        if self.colors[z] == *c {
+        self.colors[z] = *c;
+        if self.sent[z] == Some(self.regs_for(z)) {
             return self.take_error();
         }
-        self.colors[z] = *c;
         self.send_zone(z, false)
     }
 
@@ -423,6 +450,81 @@ impl NativeDevice for ZotacGpu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A device whose writer is a recording thread instead of the I²C bus.
+    fn fake(zones: usize) -> (ZotacGpu, Arc<Mutex<Vec<(u8, ZoneRegs)>>>) {
+        let log: Arc<Mutex<Vec<(u8, ZoneRegs)>>> = Arc::new(Mutex::new(Vec::new()));
+        let (tx, rx) = channel::<Job>();
+        let l = log.clone();
+        let handle = thread::spawn(move || {
+            while let Ok(job) = rx.recv() {
+                match job {
+                    Job::Write { zone, regs, reply } => {
+                        l.lock().unwrap().push((zone, regs));
+                        if let Some(r) = reply {
+                            let _ = r.send(Ok(()));
+                        }
+                    }
+                    Job::Stop => return,
+                }
+            }
+        });
+        let names = (0..zones).map(|i| format!("Zone {i}")).collect();
+        let dev = ZotacGpu::with_writer("test".into(), "v".into(), "I2C: test".into(), names, true, tx, Some(handle), Arc::new(Mutex::new(None)));
+        (dev, log)
+    }
+
+    fn drain(dev: &ZotacGpu, log: &Arc<Mutex<Vec<(u8, ZoneRegs)>>>) -> Vec<(u8, ZoneRegs)> {
+        // A write with a reply waits for everything queued before it.
+        let (tx, rx) = channel();
+        dev.tx.send(Job::Write { zone: 0xFE, regs: ZoneRegs([0; 16]), reply: Some(tx) }).unwrap();
+        rx.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
+        let mut l = log.lock().unwrap();
+        let out: Vec<_> = l.drain(..).filter(|(z, _)| *z != 0xFE).collect();
+        out
+    }
+
+    #[test]
+    fn mode_change_with_same_colour_is_written() {
+        let (mut dev, log) = fake(2);
+        let red = Color::new(255, 0, 0);
+        // Hardware Breathe in red (what `apply_hardware` does: set_mode, then the colour per zone).
+        let mut breathe = modes()[1].clone();
+        breathe.speed = 50;
+        dev.set_mode(1, &breathe).unwrap();
+        dev.zone_leds(0, &[red]).unwrap();
+        dev.zone_leds(1, &[red]).unwrap();
+        let w = drain(&dev, &log);
+        assert_eq!(w.len(), 4, "two zones for the mode, two for the colour");
+        assert!(w.iter().all(|(_, r)| r.0[2] == 0x02), "Breathe = 0x02");
+        // The same colour again changes nothing.
+        dev.zone_leds(0, &[red]).unwrap();
+        assert!(drain(&dev, &log).is_empty());
+        // Now a software static effect in the very same red: the card must switch to Static.
+        dev.set_direct().unwrap();
+        dev.zone_leds(0, &[red]).unwrap();
+        dev.zone_leds(1, &[red]).unwrap();
+        let w = drain(&dev, &log);
+        assert_eq!(w.len(), 2);
+        for (z, r) in &w {
+            assert_eq!(r.0[1], *z);
+            assert_eq!(r.0[2], 0x01, "Static");
+            assert_eq!(&r.0[3..6], &[255, 0, 0]);
+            assert_eq!(r.0[9], 100, "software effects run at full hardware brightness");
+        }
+        // And a frame with the same colour is deduped again.
+        dev.zone_leds(1, &[red]).unwrap();
+        assert!(drain(&dev, &log).is_empty());
+    }
+
+    #[test]
+    fn first_frame_is_always_written() {
+        // The card's state is unknown when we open it: even the default colour goes out.
+        let (mut dev, log) = fake(1);
+        dev.set_direct().unwrap();
+        dev.zone_leds(0, &[Color::new(0xff, 0xc2, 0x0e)]).unwrap();
+        assert_eq!(drain(&dev, &log).len(), 1);
+    }
 
     #[test]
     fn zone_registers_follow_the_layout() {

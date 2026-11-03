@@ -1,10 +1,11 @@
-import { openPath } from "@tauri-apps/plugin-opener";
-import { Cpu, ExternalLink, FolderOpen, ShieldCheck, Usb } from "lucide-react";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { Cpu, Download, ExternalLink, FolderOpen, RefreshCw, ShieldCheck, Usb } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Field, NumberInput, Select, SwitchRow, useToast } from "../components/ui";
 import { api, errText, type AppInfo, type DetectedScreen, type EngineStatus, type HwAccel, type PixelFormat, type UdevStatus } from "../lib/api";
 import { useConfig } from "../lib/hooks";
+import { checkForUpdate, type UpdateCheck } from "../lib/updates";
 
 const PIXEL_FORMATS: PixelFormat[] = ["rgb565_be", "rgb565_le", "bgr565_be", "bgr565_le", "grb565_le", "rgb888", "bgr888"];
 
@@ -15,6 +16,22 @@ export function SettingsPage({ status }: { status: EngineStatus }) {
   const [udev, setUdev] = useState<UdevStatus | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [screens, setScreens] = useState<DetectedScreen[]>([]);
+  const [upd, setUpd] = useState<UpdateCheck | null>(null);
+  const [updateErr, setUpdateErr] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const checkUpdates = () => {
+    if (!info) return;
+    setChecking(true);
+    setUpdateErr(null);
+    checkForUpdate(info.version)
+      .then((u) => {
+        setUpd(u);
+        if (u.available) toast.info(`Neru ${u.latest} is available`);
+      })
+      .catch((e) => setUpdateErr(`Could not reach GitHub: ${errText(e)}`))
+      .finally(() => setChecking(false));
+  };
 
   const refresh = () => {
     api.autostartGet().then(setAutostart).catch(() => {});
@@ -217,7 +234,29 @@ export function SettingsPage({ status }: { status: EngineStatus }) {
         </div>
         <dl className="kv">
           <dt>Version</dt>
-          <dd>{info?.version}</dd>
+          <dd className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            {info?.version}
+            <button className="btn sm" disabled={!info || checking} onClick={checkUpdates}>
+              <RefreshCw size={13} className={checking ? "spin" : undefined} /> {checking ? "Checking…" : "Check for updates"}
+            </button>
+            {upd &&
+              (upd.available ? (
+                <span className="row" style={{ gap: 8 }}>
+                  <span style={{ color: "var(--accent)" }}>Neru {upd.latest} is available</span>
+                  <button className="btn primary sm" onClick={() => openUrl(upd.appimage ?? upd.url).catch((e) => toast.error(errText(e)))}>
+                    <Download size={13} /> {upd.appimage ? "Download AppImage" : "Open release"}
+                  </button>
+                  <span className="hint">(AUR / deb users: update with your package manager)</span>
+                </span>
+              ) : (
+                <span className="hint">Up to date — {upd.latest} is the newest release.</span>
+              ))}
+            {updateErr && (
+              <span className="hint" style={{ color: "var(--red)" }}>
+                {updateErr}
+              </span>
+            )}
+          </dd>
           <dt>Config</dt>
           <dd className="row" style={{ gap: 8 }}>
             {info?.config_dir}
