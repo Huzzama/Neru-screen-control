@@ -329,9 +329,13 @@ pub fn open_first(model_id: Option<&str>) -> Result<Box<dyn Screen>> {
 pub fn udev_install_script(rules_file: &str) -> String {
     let rules = udev_rules();
     format!(
-        "set -e\ncat > {rules_file} <<'EOF'\n{rules}EOF\ncat > {} <<'EOF'\n{}EOF\nmodprobe i2c-dev 2>/dev/null || true; modprobe i2c-piix4 2>/dev/null || true; modprobe i2c-i801 2>/dev/null || true\nudevadm control --reload-rules && udevadm trigger",
-        crate::i2c::MODULES_LOAD_FILE,
-        crate::i2c::MODULES_LOAD_CONTENT
+        // Only writing the two files may fail the install. A rule left by an older
+        // Neru can be a symlink (possibly dangling) or read-only: replace it. And
+        // `udevadm trigger` exits 1 when any single device refuses a uevent (common
+        // on some boards) even though the rules are live — so it never fails us.
+        "set -e\nmkdir -p /etc/udev/rules.d /etc/modules-load.d\nrm -f {rules_file}\ncat > {rules_file} <<'EOF'\n{rules}EOF\nrm -f {m}\ncat > {m} <<'EOF'\n{}EOF\nset +e\nmodprobe i2c-dev 2>/dev/null; modprobe i2c-piix4 2>/dev/null; modprobe i2c-i801 2>/dev/null\nudevadm control --reload-rules\nfor s in usb hidraw i2c-dev; do udevadm trigger --action=change --subsystem-match=$s 2>/dev/null; done\nexit 0",
+        crate::i2c::MODULES_LOAD_CONTENT,
+        m = crate::i2c::MODULES_LOAD_FILE,
     )
 }
 

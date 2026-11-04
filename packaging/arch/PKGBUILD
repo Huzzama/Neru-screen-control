@@ -1,6 +1,6 @@
 # Maintainer: Huzzama <chewbaccanator0405@gmail.com>
 pkgname=neru-screen-control
-pkgver=2.1.0
+pkgver=2.1.1
 pkgrel=1
 pkgdesc="Cooler LCD screens (Thermaltake, Thermalright), PC RGB lighting via OpenRGB and fan curves — one app"
 arch=('x86_64')

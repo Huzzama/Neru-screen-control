@@ -107,9 +107,12 @@ command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$
 
 say "Installing the USB access rule (asks for your password; skip with Ctrl-C)"
 TMP=$(mktemp)
+# rm first: an older Neru may have left a symlink there. `udevadm trigger` can
+# exit 1 when one device refuses a uevent although the rules work, so it is not fatal.
 if fetch_text "$RAW/packaging/shared/70-neru-screen-control.rules" > "$TMP" && \
-   as_root install -m 644 "$TMP" "$RULES" && \
-   as_root udevadm control --reload-rules && as_root udevadm trigger; then
+   as_root rm -f "$RULES" && as_root install -D -m 644 "$TMP" "$RULES" && \
+   as_root udevadm control --reload-rules; then
+    for s in usb hidraw i2c-dev; do as_root udevadm trigger --action=change --subsystem-match="$s" 2>/dev/null || true; done
     say "Rule installed — unplug and replug the cooler's USB cable (or reboot)"
     # GPU RGB controllers sit on the graphics card's I2C bus: needs i2c-dev.
     printf '# Neru Screen Control: I2C access for GPU / DRAM RGB controllers\ni2c-dev\ni2c-piix4\ni2c-i801\n' > "$TMP"
