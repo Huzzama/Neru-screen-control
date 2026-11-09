@@ -339,6 +339,57 @@ pub fn udev_install_script(rules_file: &str) -> String {
     )
 }
 
+/// Install the rules as root. Tries, in order: nothing (already root), `sudo`
+/// when `interactive` (a terminal is attached), `pkexec` (graphical prompt).
+/// When none works — no polkit agent on a bare compositor, prompt closed —
+/// the script is saved and the error carries the one command that finishes
+/// the job from any terminal.
+pub fn install_rules(rules_file: &str, interactive: bool) -> std::result::Result<(), String> {
+    use std::process::Command;
+    let script = udev_install_script(rules_file);
+    let dir = std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("neru-screen-control");
+    let path = dir.join("install-rules.sh");
+    let saved = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, &script)).is_ok();
+    let manual = if saved {
+        format!("Run this in a terminal instead:  sudo sh \"{}\"", path.display())
+    } else {
+        "Run `neru udev --install` in a terminal instead.".to_string()
+    };
+    // SAFETY: geteuid has no preconditions.
+    let root = unsafe { libc::geteuid() } == 0;
+    let mut attempts: Vec<(&str, Vec<&str>)> = Vec::new();
+    if root {
+        attempts.push(("sh", vec!["-c"]));
+    } else {
+        if interactive {
+            attempts.push(("sudo", vec!["sh", "-c"]));
+        }
+        attempts.push(("pkexec", vec!["sh", "-c"]));
+    }
+    let mut why = String::from("no way to become root was found (pkexec / sudo missing)");
+    for (prog, args) in attempts {
+        let mut cmd = Command::new(prog);
+        cmd.args(&args).arg(&script);
+        let res = if interactive { cmd.status().map(|s| (s, String::new())) } else { cmd.output().map(|o| (o.status, String::from_utf8_lossy(&o.stderr).trim().to_string())) };
+        match res {
+            Ok((st, _)) if st.success() => return Ok(()),
+            Ok((st, err)) => {
+                why = match (prog, st.code()) {
+                    ("pkexec", Some(126)) => "the password prompt was closed".into(),
+                    ("pkexec", Some(127)) => "polkit did not authorise it (wrong password, or no polkit agent runs in this desktop session)".into(),
+                    (_, code) => format!("{prog} exited with {}{}", code.map_or("a signal".into(), |c| c.to_string()), if err.is_empty() { String::new() } else { format!(": {err}") }),
+                };
+            }
+            Err(e) => why = format!("{prog} could not be started ({e})"),
+        }
+    }
+    Err(format!("Rules not installed — {why}. {manual}"))
+}
+
 /// udev rules granting the current seat access to every known screen.
 pub fn udev_rules() -> String {
     let mut s = String::from(

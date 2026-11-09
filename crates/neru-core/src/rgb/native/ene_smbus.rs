@@ -179,6 +179,12 @@ pub fn find() -> Vec<Found> {
             };
             remap_dram(&mut dev);
             for &addr in RAM_ADDRESSES {
+                // Some boards answer on more than one port of the same SMBus
+                // controller: the same module must not be listed twice.
+                let slot = a.pci.as_ref().map(|p| p.slot.clone());
+                if out.iter().any(|f: &Found| f.kind == Kind::Dram && f.addr == addr && f.adapter.pci.as_ref().map(|p| p.slot.clone()) == slot) {
+                    continue;
+                }
                 if probe(&mut dev, addr) {
                     out.push(Found { adapter: a.clone(), addr, name: "ENE DRAM".into(), kind: Kind::Dram });
                 }

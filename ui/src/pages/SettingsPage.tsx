@@ -19,6 +19,7 @@ export function SettingsPage({ status }: { status: EngineStatus }) {
   const [upd, setUpd] = useState<UpdateCheck | null>(null);
   const [updateErr, setUpdateErr] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [rulesErr, setRulesErr] = useState<string | null>(null);
 
   const checkUpdates = () => {
     if (!info) return;
@@ -156,6 +157,7 @@ export function SettingsPage({ status }: { status: EngineStatus }) {
         </div>
         <SwitchRow title="RGB control" desc="Drive lighting with Neru's own drivers (ASUS Aura motherboards, ZOTAC RTX 50 cards, …)." on={config.rgb.enabled} onChange={(v) => save((c) => ({ ...c, rgb: { ...c.rgb, enabled: v } }))} />
         <SwitchRow title="Use OpenRGB for other devices" desc="Optional. Devices Neru has no driver for yet are reached through an installed OpenRGB." on={config.rgb.use_openrgb} onChange={(v) => save((c) => ({ ...c, rgb: { ...c.rgb, use_openrgb: v } }))} />
+        <SwitchRow title="Prefer OpenRGB when both can drive a device" desc="A device seen by Neru's own driver and by OpenRGB is listed once. Off: Neru drives it. Turn this on if a device (RAM, GPU…) misbehaves with Neru's driver." on={!!config.rgb.prefer_openrgb} onChange={(v) => save((c) => ({ ...c, rgb: { ...c.rgb, prefer_openrgb: v } }))} />
         <SwitchRow title="Start the OpenRGB server when needed" desc="Runs `openrgb --server` headless if nothing answers on the address below (OpenRGB must be installed)." on={config.rgb.start_server} onChange={(v) => save((c) => ({ ...c, rgb: { ...c.rgb, start_server: v } }))} />
         <div className="grid grid-2" style={{ marginTop: 12 }}>
           <Field label="Server address" hint="host:port of the OpenRGB SDK server.">
@@ -187,15 +189,21 @@ export function SettingsPage({ status }: { status: EngineStatus }) {
               api
                 .installUdev()
                 .then(() => {
+                  setRulesErr(null);
                   toast.success("Rules installed — replug the screen");
                   refresh();
                 })
-                .catch((e) => toast.error(errText(e)))
+                .catch((e) => { setRulesErr(errText(e)); toast.error("Rules not installed — see the message below"); })
             }
           >
             <ShieldCheck size={15} />
             Install rules
           </button>
+          {rulesErr && (
+            <div className="hint mono" style={{ color: "var(--red)", userSelect: "text", whiteSpace: "pre-wrap", marginTop: 6 }}>
+              {rulesErr}
+            </div>
+          )}
           {screens.length > 0 && (
             <span className="small muted">
               Detected: {screens.map((s) => `${s.model.vendor} ${s.model.name} (${s.location}${s.accessible ? "" : ", no access"})`).join("; ")}

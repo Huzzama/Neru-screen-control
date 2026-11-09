@@ -209,7 +209,7 @@ export type Effect =
   | { kind: "hardware"; mode: string; color: string | null; speed: number | null; brightness: number | null; direction?: number | null };
 
 export interface RgbAssignment { controller: string; zone: number | null; effect: Effect }
-export interface RgbConfig { enabled: boolean; server: string; fps: number; brightness: number; assignments: RgbAssignment[]; use_openrgb: boolean; start_server: boolean; zone_sizes: Record<string, number> }
+export interface RgbConfig { enabled: boolean; server: string; fps: number; brightness: number; assignments: RgbAssignment[]; use_openrgb: boolean; start_server: boolean; zone_sizes: Record<string, number>; prefer_openrgb: boolean }
 export interface RgbMode {
   name: string; value: number; flags: number; speed_min: number; speed_max: number; brightness_min: number; brightness_max: number;
   colors_min: number; colors_max: number; speed: number; brightness: number; direction: number; color_mode: number; colors: { r: number; g: number; b: number }[];

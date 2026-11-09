@@ -45,6 +45,10 @@ pub struct RgbConfig {
     pub start_server: bool,
     /// LED counts of resizable zones (ARGB headers): `"<controller key>#<zone>"` → LEDs.
     pub zone_sizes: HashMap<String, u32>,
+    /// When Neru's own driver and OpenRGB both see a device, drive it through
+    /// OpenRGB (off = Neru's driver). The device is never listed twice.
+    #[serde(default)]
+    pub prefer_openrgb: bool,
 }
 
 impl Default for RgbConfig {
@@ -58,8 +62,29 @@ impl Default for RgbConfig {
             use_openrgb: true,
             start_server: true,
             zone_sizes: HashMap::new(),
+            prefer_openrgb: false,
         }
     }
+}
+
+/// Bus identity of a location string, comparable between Neru's drivers and
+/// OpenRGB, which describe the same chip differently:
+///   Neru     `I2C: /dev/i2c-4 (SMBus PIIX4 adapter port 0 at 0b00), address 0x70`
+///   OpenRGB  `I2C: SMBus PIIX4 adapter port 0 at 0b00, address 0x70`
+/// I2C → (adapter name, address); anything else → the whole string.
+pub fn location_identity(loc: &str) -> String {
+    let l = loc.trim();
+    if let Some(rest) = l.strip_prefix("I2C:") {
+        if let Some((bus, addr)) = rest.rsplit_once(", address ") {
+            let bus = bus.trim();
+            let name = match (bus.find('('), bus.rfind(')')) {
+                (Some(a), Some(b)) if bus.starts_with("/dev/") && b > a => &bus[a + 1..b],
+                _ => bus,
+            };
+            return format!("i2c|{}|{}", name.trim().to_ascii_lowercase(), addr.trim().to_ascii_lowercase());
+        }
+    }
+    l.to_ascii_lowercase()
 }
 
 impl RgbConfig {
@@ -286,9 +311,17 @@ impl Worker {
 
     /// Rebuild the merged list from both sources.
     fn merge(&mut self) {
+        // One entry per physical device: where both sources see it, keep the
+        // preferred one (Neru's driver unless `prefer_openrgb`).
         let mut list = self.native.controllers();
-        let native_locs = self.native.locations();
-        list.extend(self.orgb_controllers.iter().filter(|c| !native_locs.contains(&c.location)).cloned());
+        let native_ids: HashSet<String> = list.iter().map(|c| location_identity(&c.location)).collect();
+        let orgb_ids: HashSet<String> = self.orgb_controllers.iter().map(|c| location_identity(&c.location)).collect();
+        if self.cfg.prefer_openrgb {
+            list.retain(|c| !orgb_ids.contains(&location_identity(&c.location)));
+            list.extend(self.orgb_controllers.iter().cloned());
+        } else {
+            list.extend(self.orgb_controllers.iter().filter(|c| !native_ids.contains(&location_identity(&c.location))).cloned());
+        }
         Controller::assign_ordinals(&mut list);
         self.controllers = list;
     }
@@ -798,4 +831,20 @@ fn sample(colors: &[Color]) -> Vec<String> {
         i += step;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::location_identity;
+
+    #[test]
+    fn native_and_openrgb_locations_match() {
+        let n = "I2C: /dev/i2c-4 (SMBus PIIX4 adapter port 0 at 0b00), address 0x70";
+        let o = "I2C: SMBus PIIX4 adapter port 0 at 0b00, address 0x70";
+        assert_eq!(location_identity(n), location_identity(o));
+        assert_ne!(location_identity(n), location_identity("I2C: SMBus PIIX4 adapter port 0 at 0b00, address 0x71"));
+        assert_ne!(location_identity(n), location_identity("I2C: SMBus PIIX4 adapter port 2 at 0b00, address 0x70"));
+        assert_eq!(location_identity("HID: /dev/hidraw3"), location_identity("HID: /dev/hidraw3 "));
+        assert_eq!(location_identity("I2C: /dev/i2c-9 (NVIDIA i2c adapter 1 at 1:00.0), address 0x4B"), location_identity("I2C: NVIDIA i2c adapter 1 at 1:00.0, address 0x4B"));
+    }
 }

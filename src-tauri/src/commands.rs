@@ -224,24 +224,7 @@ pub fn udev_status(state: State<AppState>) -> UdevStatus {
 
 #[tauri::command]
 pub fn install_udev() -> Res<()> {
-    let script = screen::udev_install_script(UDEV_FILE);
-    let out = std::process::Command::new("pkexec")
-        .args(["sh", "-c", &script])
-        .output()
-        .map_err(|e| format!("could not run pkexec (is polkit installed?): {e}"))?;
-    match out.status.code() {
-        Some(0) => Ok(()),
-        Some(126) => Err("cancelled — the password prompt was closed".into()),
-        Some(127) => Err("not authorised by polkit (wrong password, or no polkit agent running in this session)".into()),
-        code => {
-            let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
-            Err(format!(
-                "installation failed (exit {}){}",
-                code.map_or("signal".into(), |c| c.to_string()),
-                if msg.is_empty() { String::new() } else { format!(": {msg}") }
-            ))
-        }
-    }
+    screen::install_rules(UDEV_FILE, false)
 }
 
 #[tauri::command]

@@ -701,13 +701,9 @@ fn udev(install: bool) -> anyhow::Result<()> {
         eprintln!("\nInstall with:  neru udev --install   (or copy the text above to {UDEV_FILE})");
         return Ok(());
     }
-    let script = neru_core::screen::udev_install_script(UDEV_FILE);
-    let status = std::process::Command::new("pkexec")
-        .args(["sh", "-c", &script])
-        .status()
-        .context("running pkexec (is polkit installed?)")?;
-    if !status.success() {
-        bail!("installation failed (status {status})");
+    use std::io::IsTerminal;
+    if let Err(e) = screen::install_rules(UDEV_FILE, std::io::stdin().is_terminal()) {
+        bail!("{e}");
     }
     println!("installed {UDEV_FILE} and {}. Unplug and replug the screen's USB cable (or reboot).", neru_core::i2c::MODULES_LOAD_FILE);
     Ok(())

@@ -1,6 +1,6 @@
 pkgbase = neru-screen-control
 	pkgdesc = Cooler LCD screens (Thermaltake, Thermalright), PC RGB lighting via OpenRGB and fan curves — one app
-	pkgver = 2.1.1
+	pkgver = 2.1.2
 	pkgrel = 1
 	url = https://github.com/Huzzama/Neru-screen-control
 	arch = x86_64
@@ -18,7 +18,7 @@ pkgbase = neru-screen-control
 	depends = polkit
 	optdepends = openrgb: RGB lighting control
 	optdepends = ffmpeg: video backgrounds on the screen
-	source = neru-screen-control-2.1.1.tar.gz::https://github.com/Huzzama/Neru-screen-control/archive/v2.1.1.tar.gz
+	source = neru-screen-control-2.1.2.tar.gz::https://github.com/Huzzama/Neru-screen-control/archive/v2.1.2.tar.gz
 	sha256sums = SKIP
 
 pkgname = neru-screen-control
